@@ -72,7 +72,7 @@ The command will be combined with `touchstone-pytest-args` when executing tests.
   :type '(repeat string)
   :group 'touchstone)
 
-(defcustom touchstone-pytest-args '("-v" "--tb=short" "--color=yes")
+(defcustom touchstone-pytest-args '("-v" "--color=no")
   "Default arguments to pass to pytest."
   :type '(repeat string)
   :group 'touchstone)
@@ -88,8 +88,41 @@ The command will be combined with `touchstone-pytest-args` when executing tests.
 (defvar touchstone--output-buffer ""
   "Accumulator for partial output from the test process.")
 
+(defvar touchstone--line-buffer ""
+  "Accumulator for partial lines from the test process.")
+
 (defvar touchstone--project-root nil
   "Cached project root directory.")
+
+;;; Pytest Output Parsing
+
+(defun touchstone--parse-pytest-line (line)
+  "Parse a pytest output LINE and return test result data.
+Returns a plist with :file, :test, and :status, or nil if not a test result line."
+  (when (string-match
+         "^\\(.*?\\)::\\(.*?\\) \\(PASSED\\|FAILED\\|SKIPPED\\|ERROR\\)"
+         line)
+    (list :file (match-string 1 line)
+          :test (match-string 2 line)
+          :status (match-string 3 line))))
+
+(defun touchstone--format-test-result (result)
+  "Format a parsed test RESULT as a display line."
+  (let* ((file (plist-get result :file))
+         (test (plist-get result :test))
+         (status (plist-get result :status))
+         (status-face (cond
+                       ((string= status "PASSED") 'success)
+                       ((string= status "FAILED") 'error)
+                       ((string= status "SKIPPED") 'warning)
+                       ((string= status "ERROR") 'error))))
+    (concat
+     (propertize file 'face 'default)
+     "::"
+     (propertize test 'face 'default)
+     " "
+     (propertize (format "[%s]" status) 'face status-face)
+     "\n")))
 
 ;;; Project Detection
 
@@ -165,17 +198,47 @@ The process streams output to the touchstone results buffer."
   "Process filter for touchstone test process PROC.
 Accumulates STRING output and updates the results buffer incrementally."
   (when (buffer-live-p (process-buffer proc))
-    ;; Accumulate output
+    ;; Accumulate all output for debugging
     (setq touchstone--output-buffer
           (concat touchstone--output-buffer string))
-    ;; Update the results buffer with new output
-    (touchstone--update-results-buffer string)))
+    ;; Accumulate into line buffer
+    (setq touchstone--line-buffer
+          (concat touchstone--line-buffer string))
+    ;; Process complete lines
+    (let ((lines (split-string touchstone--line-buffer "\n")))
+      ;; If the buffer ends with a newline, we have all complete lines
+      ;; Otherwise, keep the last partial line in the buffer
+      (if (string-suffix-p "\n" touchstone--line-buffer)
+          (progn
+            (dolist (line lines)
+              (touchstone--process-line line))
+            (setq touchstone--line-buffer ""))
+        ;; Keep the last partial line
+        (let ((complete-lines (butlast lines))
+              (partial-line (car (last lines))))
+          (dolist (line complete-lines)
+            (touchstone--process-line line))
+          (setq touchstone--line-buffer partial-line))))))
+
+(defun touchstone--process-line (line)
+  "Process a complete LINE from pytest output.
+If the line is a test result, display it in the results buffer."
+  (message "DEBUG: Processing line: %S" line)
+  (let ((result (touchstone--parse-pytest-line line)))
+    (message "DEBUG: Parse result: %S" result)
+    (when result
+      (touchstone--display-test-result result))))
 
 (defun touchstone--process-sentinel (proc event)
   "Process sentinel for touchstone test process PROC.
 Handles process completion and errors based on EVENT."
   (let ((status (process-status proc))
         (exit-code (process-exit-status proc)))
+    ;; Process any remaining partial line
+    (when (and (not (string-empty-p touchstone--line-buffer))
+               (eq status 'exit))
+      (touchstone--process-line touchstone--line-buffer)
+      (setq touchstone--line-buffer ""))
     (cond
      ((eq status 'exit)
       (touchstone--handle-process-complete exit-code))
@@ -185,14 +248,15 @@ Handles process completion and errors based on EVENT."
 (defun touchstone--handle-process-complete (exit-code)
   "Handle test process completion with EXIT-CODE."
   (with-current-buffer (touchstone--get-results-buffer)
-    (let ((inhibit-read-only t))
+    (let ((inhibit-read-only t)
+          (message (cond
+                    ((zerop exit-code) "All tests passed")
+                    ((= exit-code 1) "Some tests failed")
+                    (t (format "Test run error (exit code: %d)" exit-code))))
+          (face (if (zerop exit-code) 'success 'error)))
       (goto-char (point-max))
       (insert "\n")
-      (insert (propertize
-               (format "Test run completed (exit code: %d)\n" exit-code)
-               'face (if (zerop exit-code)
-                         'success
-                       'error))))))
+      (insert (propertize (concat message "\n") 'face face)))))
 
 (defun touchstone--handle-process-error (event)
   "Handle test process error with EVENT description."
@@ -229,18 +293,16 @@ Handles process completion and errors based on EVENT."
       (erase-buffer)
       (insert (propertize "Running tests...\n\n"
                           'face 'bold))
-      (setq touchstone--output-buffer ""))))
+      (setq touchstone--output-buffer "")
+      (setq touchstone--line-buffer ""))))
 
-(defun touchstone--update-results-buffer (output)
-  "Update the results buffer with new OUTPUT from the test process."
+(defun touchstone--display-test-result (result)
+  "Display a formatted test RESULT in the results buffer."
   (with-current-buffer (touchstone--get-results-buffer)
     (let ((inhibit-read-only t))
       (save-excursion
         (goto-char (point-max))
-        ;; Insert and colorize the output
-        (let ((start (point)))
-          (insert output)
-          (ansi-color-apply-on-region start (point)))))))
+        (insert (touchstone--format-test-result result))))))
 
 (defun touchstone--display-results-buffer ()
   "Display the touchstone results buffer."
