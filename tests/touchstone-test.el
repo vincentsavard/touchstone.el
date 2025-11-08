@@ -94,6 +94,42 @@
           (should (plist-get details :location))
           (should (string-match-p "ValueError" (plist-get details :location))))))))
 
+(ert-deftest touchstone-test-with-output ()
+  "Test parsing pytest output with captured stdout/stderr."
+  (let ((test-buffer (touchstone--get-results-buffer)))
+    (with-current-buffer test-buffer
+      (touchstone--init-results-buffer)
+
+      ;; Simulate pytest output
+      (let ((output (touchstone-test-load-fixture "pytest-with-output.txt")))
+        (touchstone-test-simulate-output output))
+
+      ;; Validate correct number of tests
+      (should (= (hash-table-count touchstone--test-results) 2))
+
+      ;; Validate both tests are FAILED
+      (let ((test-stdout (gethash "test_output.py::test_with_stdout" touchstone--test-results))
+            (test-stderr (gethash "test_output.py::test_with_stderr" touchstone--test-results)))
+
+        (should (string= "FAILED" (plist-get test-stdout :status)))
+        (should (string= "FAILED" (plist-get test-stderr :status)))
+
+        ;; Both should have details
+        (should (plist-get test-stdout :details))
+        (should (plist-get test-stderr :details))
+
+        ;; Validate captured stdout
+        (let ((details (plist-get test-stdout :details)))
+          (should (plist-get details :stdout))
+          (should (string-match-p "Debug output line 1" (plist-get details :stdout)))
+          (should (string-match-p "Debug output line 2" (plist-get details :stdout))))
+
+        ;; Validate captured stderr
+        (let ((details (plist-get test-stderr :details)))
+          (should (plist-get details :stderr))
+          (should (string-match-p "Error message 1" (plist-get details :stderr)))
+          (should (string-match-p "Error message 2" (plist-get details :stderr))))))))
+
 (provide 'touchstone-test)
 
 ;;; touchstone-test.el ends here

@@ -1,0 +1,41 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.1, pytest-9.0.0, pluggy-1.6.0 -- /tmp/foo/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /tmp/foo
+configfile: pyproject.toml
+collecting ... collected 2 items
+
+test_output.py::test_with_stdout FAILED                                  [ 50%]
+test_output.py::test_with_stderr FAILED                                  [100%]
+
+=================================== FAILURES ===================================
+_______________________________ test_with_stdout _______________________________
+
+    def test_with_stdout():
+        print("Debug output line 1")
+        print("Debug output line 2")
+>       assert False, "Intentional failure"
+E       AssertionError: Intentional failure
+E       assert False
+
+test_output.py:4: AssertionError
+----------------------------- Captured stdout call -----------------------------
+Debug output line 1
+Debug output line 2
+_______________________________ test_with_stderr _______________________________
+
+    def test_with_stderr():
+        import sys
+        sys.stderr.write("Error message 1\n")
+        sys.stderr.write("Error message 2\n")
+>       assert 1 == 2
+E       assert 1 == 2
+
+test_output.py:11: AssertionError
+----------------------------- Captured stderr call -----------------------------
+Error message 1
+Error message 2
+=========================== short test summary info ============================
+FAILED test_output.py::test_with_stdout - AssertionError: Intentional failure
+FAILED test_output.py::test_with_stderr - assert 1 == 2
+============================== 2 failed in 0.02s ===============================

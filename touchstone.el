@@ -72,7 +72,7 @@ The command will be combined with `touchstone-pytest-args` when executing tests.
   :type '(repeat string)
   :group 'touchstone)
 
-(defcustom touchstone-pytest-args '("-v" "--color=no")
+(defcustom touchstone-pytest-args '("-v" "--color=no" "-p" "no:progress")
   "Default arguments to pass to pytest."
   :type '(repeat string)
   :group 'touchstone)
@@ -129,10 +129,11 @@ Returns a plist with :file, :test, and :status, or nil if not a test result line
   (cond
    ;; Start of a new failure block: _____ test_name _____
    ((string-match "^_+ \\(.*\\) _+$" line)
-    (touchstone--finish-current-failure)
-    (setq touchstone--current-failure (match-string 1 line))
-    (setq touchstone--current-failure-details
-          (list :traceback nil :error-lines nil :location nil :stdout nil :stderr nil)))
+    (let ((test-name (match-string 1 line)))
+      (touchstone--finish-current-failure)
+      (setq touchstone--current-failure test-name)
+      (setq touchstone--current-failure-details
+            (list :traceback nil :error-lines nil :location nil :stdout nil :stderr nil))))
 
    ;; Captured stdout section
    ((string-match "^-+ Captured stdout call -+$" line)
@@ -180,7 +181,7 @@ Returns a plist with :file, :test, and :status, or nil if not a test result line
     (maphash
      (lambda (key value)
        (when (string-suffix-p touchstone--current-failure key)
-         (plist-put value :details touchstone--current-failure-details)
+         (puthash key (plist-put value :details touchstone--current-failure-details) touchstone--test-results)
          (touchstone--update-test-display key)))
      touchstone--test-results)
     (setq touchstone--current-failure nil)
@@ -278,6 +279,7 @@ The process streams output to the touchstone results buffer."
      :name process-name
      :buffer process-buffer
      :command command-list
+     :connection-type 'pipe
      :filter #'touchstone--process-filter
      :sentinel #'touchstone--process-sentinel
      :noquery t)))
@@ -317,7 +319,7 @@ Handles test results, failure details, and section markers."
     (setq touchstone--parsing-failures t))
 
    ;; Check for end of FAILURES section (short test summary or final summary)
-   ((string-match "^=+ \\(short test summary\\|[0-9]+ failed\\)" line)
+   ((string-match "^=+ \\(short test summary\\|[0-9].* in [0-9]\\)" line)
     (touchstone--finish-current-failure)
     (setq touchstone--parsing-failures nil))
 
