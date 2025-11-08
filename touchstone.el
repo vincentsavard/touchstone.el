@@ -476,6 +476,9 @@ Handles process completion and errors based on EVENT."
   "Create a collapsible overlay for test RESULT at POSITION."
   (let* ((details (plist-get result :details))
          (details-text (touchstone--format-details details))
+         (file (plist-get result :file))
+         (test (plist-get result :test))
+         (identifier (touchstone--test-identifier file test))
          (start position)
          (end position))
     ;; Insert the details text (invisible by default)
@@ -487,34 +490,69 @@ Handles process completion and errors based on EVENT."
     (let ((ov (make-overlay start end)))
       (overlay-put ov 'invisible t)
       (overlay-put ov 'touchstone-details t)
+      (overlay-put ov 'touchstone-test-id identifier)
       (overlay-put ov 'evaporate t)
       ;; Store overlay reference in the result
       (plist-put result :overlay ov))))
 
 (defun touchstone--toggle-details-at-point ()
-  "Toggle visibility of test details at point."
+  "Toggle visibility of test details at point.
+If point is on a test line, toggle its details.
+If point is within details, collapse them and move to the test line."
   (interactive)
   (let* ((line-start (line-beginning-position))
-         (line-end (line-end-position))
-         ;; Get the test identifier from the text property
-         (test-id (get-text-property line-start 'touchstone-test-id)))
-    (if (and test-id
-             (gethash test-id touchstone--test-results))
-        (let* ((result (gethash test-id touchstone--test-results))
-               (overlay (plist-get result :overlay)))
-          (if overlay
-              (let ((currently-invisible (overlay-get overlay 'invisible)))
-                (overlay-put overlay 'invisible (not currently-invisible))
-                ;; Update the indicator on the test line
-                (save-excursion
-                  (goto-char line-start)
-                  (when (looking-at "\\[.\\] ")
-                    (let ((inhibit-read-only t)
-                          (new-indicator (if currently-invisible "[-] " "[+] ")))
-                      (delete-char 4)  ; Delete all 4 chars: [+] or [-] plus space
-                      (insert (propertize new-indicator 'touchstone-test-id test-id))))))
-            (message "No details available for this test")))
-      (message "Not on a test result line"))))
+         ;; Check if we're on a test line
+         (test-id-from-line (get-text-property line-start 'touchstone-test-id))
+         ;; Check if we're within a details overlay
+         (overlays-here (overlays-at (point)))
+         (details-overlay (seq-find (lambda (ov)
+                                      (overlay-get ov 'touchstone-details))
+                                    overlays-here))
+         (test-id-from-overlay (when details-overlay
+                                 (overlay-get details-overlay 'touchstone-test-id))))
+    (cond
+     ;; Case 1: We're on a test line
+     ((and test-id-from-line
+           (gethash test-id-from-line touchstone--test-results))
+      (let* ((result (gethash test-id-from-line touchstone--test-results))
+             (overlay (plist-get result :overlay)))
+        (if overlay
+            (let ((currently-invisible (overlay-get overlay 'invisible)))
+              (overlay-put overlay 'invisible (not currently-invisible))
+              ;; Update the indicator on the test line
+              (save-excursion
+                (goto-char line-start)
+                (when (looking-at "\\[.\\] ")
+                  (let ((inhibit-read-only t)
+                        (new-indicator (if currently-invisible "[-] " "[+] ")))
+                    (delete-char 4)
+                    (insert (propertize new-indicator 'touchstone-test-id test-id-from-line))))))
+          (message "No details available for this test"))))
+
+     ;; Case 2: We're within a details overlay
+     ((and details-overlay test-id-from-overlay
+           (gethash test-id-from-overlay touchstone--test-results))
+      (let* ((result (gethash test-id-from-overlay touchstone--test-results))
+             (marker (plist-get result :marker))
+             (line-start (save-excursion
+                          (goto-char marker)
+                          (beginning-of-line)
+                          (point))))
+        ;; Collapse the details
+        (overlay-put details-overlay 'invisible t)
+        ;; Update the indicator on the test line
+        (save-excursion
+          (goto-char line-start)
+          (when (looking-at "\\[.\\] ")
+            (let ((inhibit-read-only t))
+              (delete-char 4)
+              (insert (propertize "[+] " 'touchstone-test-id test-id-from-overlay)))))
+        ;; Move point to the start of the test line
+        (goto-char line-start)))
+
+     ;; Case 3: Not on a test line or in details
+     (t
+      (message "Not on a test result line or within details")))))
 
 (defun touchstone--display-results-buffer ()
   "Display the touchstone results buffer."
