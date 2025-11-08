@@ -1,0 +1,13 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.1, pytest-8.4.2, pluggy-1.6.0 -- /home/vincentsavard/workspace/touchstone.el-py/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /home/vincentsavard/workspace/touchstone.el-py
+configfile: pyproject.toml
+collecting ... collected 4 items
+
+tests/test_example.py::test_one PASSED                                   [ 25%]
+tests/test_example.py::test_two PASSED                                   [ 50%]
+tests/test_example.py::test_three PASSED                                 [ 75%]
+tests/test_example.py::test_four PASSED                                  [100%]
+
+============================== 4 passed in 0.12s ===============================
