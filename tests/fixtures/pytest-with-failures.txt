@@ -1,0 +1,33 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.1, pytest-8.4.2, pluggy-1.6.0 -- /home/vincentsavard/workspace/touchstone.el-py/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /home/vincentsavard/workspace/touchstone.el-py
+configfile: pyproject.toml
+collecting ... collected 4 items
+
+tests/test_example.py::test_one PASSED                                   [ 25%]
+tests/test_example.py::test_two FAILED                                   [ 50%]
+tests/test_example.py::test_three PASSED                                 [ 75%]
+tests/test_example.py::test_four FAILED                                  [100%]
+
+=================================== FAILURES ===================================
+__________________________________ test_two ____________________________________
+
+    def test_two():
+        x = 10
+        y = 20
+>       assert x == y
+E       assert 10 == 20
+
+tests/test_example.py:15: AssertionError
+__________________________________ test_four ___________________________________
+
+    def test_four():
+>       raise ValueError("Something went wrong!")
+E       ValueError: Something went wrong!
+
+tests/test_example.py:23: ValueError
+=========================== short test summary info ============================
+FAILED tests/test_example.py::test_two - AssertionError: assert 10 == 20
+FAILED tests/test_example.py::test_four - ValueError: Something went wrong!
+==================== 2 failed, 2 passed in 0.15s ===============================
