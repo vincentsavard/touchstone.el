@@ -94,6 +94,20 @@ The command will be combined with `touchstone-pytest-args` when executing tests.
 (defvar touchstone--project-root nil
   "Cached project root directory.")
 
+(defvar touchstone--test-results nil
+  "Hash table mapping test identifiers to result data.
+Keys are strings like \"file::test_name\".
+Values are plists with :file, :test, :status, :marker, :details.")
+
+(defvar touchstone--parsing-failures nil
+  "Non-nil when we're inside the FAILURES section.")
+
+(defvar touchstone--current-failure nil
+  "Current failure being parsed (test identifier).")
+
+(defvar touchstone--current-failure-details nil
+  "Accumulator for current failure details.")
+
 ;;; Pytest Output Parsing
 
 (defun touchstone--parse-pytest-line (line)
@@ -106,23 +120,97 @@ Returns a plist with :file, :test, and :status, or nil if not a test result line
           :test (match-string 2 line)
           :status (match-string 3 line))))
 
+(defun touchstone--test-identifier (file test)
+  "Create a test identifier from FILE and TEST name."
+  (concat file "::" test))
+
+(defun touchstone--parse-failure-line (line)
+  "Parse a LINE from the FAILURES section."
+  (cond
+   ;; Start of a new failure block: _____ test_name _____
+   ((string-match "^_+ \\(.*\\) _+$" line)
+    (touchstone--finish-current-failure)
+    (setq touchstone--current-failure (match-string 1 line))
+    (setq touchstone--current-failure-details
+          (list :traceback nil :error-lines nil :location nil :stdout nil :stderr nil)))
+
+   ;; Captured stdout section
+   ((string-match "^-+ Captured stdout call -+$" line)
+    (plist-put touchstone--current-failure-details :capturing-stdout t))
+
+   ;; Captured stderr section
+   ((string-match "^-+ Captured stderr call -+$" line)
+    (plist-put touchstone--current-failure-details :capturing-stdout nil)
+    (plist-put touchstone--current-failure-details :capturing-stderr t))
+
+   ;; File location line: tests/file.py:9: AssertionError
+   ((string-match "^\\([^:]+\\):\\([0-9]+\\): \\(.*\\)$" line)
+    (plist-put touchstone--current-failure-details :location line))
+
+   ;; Error detail line (starts with "E   ")
+   ((string-match "^E   " line)
+    (let ((error-lines (plist-get touchstone--current-failure-details :error-lines)))
+      (plist-put touchstone--current-failure-details :error-lines
+                 (append error-lines (list line)))))
+
+   ;; Captured output or traceback
+   (touchstone--current-failure
+    (cond
+     ((plist-get touchstone--current-failure-details :capturing-stdout)
+      (let ((stdout (plist-get touchstone--current-failure-details :stdout)))
+        (plist-put touchstone--current-failure-details :stdout
+                   (if stdout (concat stdout "\n" line) line))))
+
+     ((plist-get touchstone--current-failure-details :capturing-stderr)
+      (let ((stderr (plist-get touchstone--current-failure-details :stderr)))
+        (plist-put touchstone--current-failure-details :stderr
+                   (if stderr (concat stderr "\n" line) line))))
+
+     ;; Regular traceback line (indented)
+     ((string-match "^    " line)
+      (let ((traceback (plist-get touchstone--current-failure-details :traceback)))
+        (plist-put touchstone--current-failure-details :traceback
+                   (append traceback (list line)))))))))
+
+(defun touchstone--finish-current-failure ()
+  "Finish parsing the current failure and store its details."
+  (when touchstone--current-failure
+    ;; Find the test result by matching the test name
+    ;; The failure header might be just the test name, we need to find the full identifier
+    (maphash
+     (lambda (key value)
+       (when (string-suffix-p touchstone--current-failure key)
+         (plist-put value :details touchstone--current-failure-details)
+         (touchstone--update-test-display key)))
+     touchstone--test-results)
+    (setq touchstone--current-failure nil)
+    (setq touchstone--current-failure-details nil)))
+
 (defun touchstone--format-test-result (result)
   "Format a parsed test RESULT as a display line."
   (let* ((file (plist-get result :file))
          (test (plist-get result :test))
          (status (plist-get result :status))
+         (identifier (touchstone--test-identifier file test))
+         (has-details (and (member status '("FAILED" "ERROR"))
+                          (plist-get result :details)))
          (status-face (cond
                        ((string= status "PASSED") 'success)
                        ((string= status "FAILED") 'error)
                        ((string= status "SKIPPED") 'warning)
                        ((string= status "ERROR") 'error))))
-    (concat
-     (propertize file 'face 'default)
-     "::"
-     (propertize test 'face 'default)
-     " "
-     (propertize (format "[%s]" status) 'face status-face)
-     "\n")))
+    (propertize
+     (concat
+      (if has-details
+          (propertize "[+] " 'face 'shadow)
+        "    ")
+      (propertize file 'face 'default)
+      "::"
+      (propertize test 'face 'default)
+      " "
+      (propertize (format "[%s]" status) 'face status-face)
+      "\n")
+     'touchstone-test-id identifier)))
 
 ;;; Project Detection
 
@@ -222,12 +310,25 @@ Accumulates STRING output and updates the results buffer incrementally."
 
 (defun touchstone--process-line (line)
   "Process a complete LINE from pytest output.
-If the line is a test result, display it in the results buffer."
-  (message "DEBUG: Processing line: %S" line)
-  (let ((result (touchstone--parse-pytest-line line)))
-    (message "DEBUG: Parse result: %S" result)
-    (when result
-      (touchstone--display-test-result result))))
+Handles test results, failure details, and section markers."
+  (cond
+   ;; Check for FAILURES section start
+   ((string-match "^=+ FAILURES =+$" line)
+    (setq touchstone--parsing-failures t))
+
+   ;; Check for end of FAILURES section (short test summary or final summary)
+   ((string-match "^=+ \\(short test summary\\|[0-9]+ failed\\)" line)
+    (touchstone--finish-current-failure)
+    (setq touchstone--parsing-failures nil))
+
+   ;; Inside FAILURES section
+   (touchstone--parsing-failures
+    (touchstone--parse-failure-line line))
+
+   ;; Test result line (outside FAILURES section)
+   (t
+    (when-let* ((result (touchstone--parse-pytest-line line)))
+      (touchstone--display-test-result result)))))
 
 (defun touchstone--process-sentinel (proc event)
   "Process sentinel for touchstone test process PROC.
@@ -239,6 +340,9 @@ Handles process completion and errors based on EVENT."
                (eq status 'exit))
       (touchstone--process-line touchstone--line-buffer)
       (setq touchstone--line-buffer ""))
+    ;; Finish any pending failure parsing
+    (when (eq status 'exit)
+      (touchstone--finish-current-failure))
     (cond
      ((eq status 'exit)
       (touchstone--handle-process-complete exit-code))
@@ -294,15 +398,123 @@ Handles process completion and errors based on EVENT."
       (insert (propertize "Running tests...\n\n"
                           'face 'bold))
       (setq touchstone--output-buffer "")
-      (setq touchstone--line-buffer ""))))
+      (setq touchstone--line-buffer "")
+      (setq touchstone--test-results (make-hash-table :test 'equal))
+      (setq touchstone--parsing-failures nil)
+      (setq touchstone--current-failure nil)
+      (setq touchstone--current-failure-details nil))))
 
 (defun touchstone--display-test-result (result)
   "Display a formatted test RESULT in the results buffer."
-  (with-current-buffer (touchstone--get-results-buffer)
-    (let ((inhibit-read-only t))
-      (save-excursion
-        (goto-char (point-max))
-        (insert (touchstone--format-test-result result))))))
+  (let* ((file (plist-get result :file))
+         (test (plist-get result :test))
+         (identifier (touchstone--test-identifier file test)))
+    (with-current-buffer (touchstone--get-results-buffer)
+      (let ((inhibit-read-only t))
+        (save-excursion
+          (goto-char (point-max))
+          (let ((start (point)))
+            (insert (touchstone--format-test-result result))
+            ;; Store the result with a marker that advances when text is inserted before it
+            (puthash identifier
+                     (plist-put result :marker (copy-marker start t))
+                     touchstone--test-results)))))))
+
+(defun touchstone--update-test-display (identifier)
+  "Update the display for test IDENTIFIER with its details."
+  (when-let* ((result (gethash identifier touchstone--test-results))
+              (marker (plist-get result :marker)))
+    (with-current-buffer (touchstone--get-results-buffer)
+      (let ((inhibit-read-only t))
+        (save-excursion
+          (goto-char marker)
+          (delete-region (point) (line-end-position))
+          (insert (substring (touchstone--format-test-result result) 0 -1))
+          ;; Add collapsible details if present
+          (when (plist-get result :details)
+            (forward-line 1)
+            (touchstone--create-details-overlay result (point))))))))
+
+;;; Collapsible Details
+
+(defun touchstone--format-details (details)
+  "Format test DETAILS for display."
+  (let ((parts nil))
+    ;; Add traceback
+    (when-let* ((traceback (plist-get details :traceback)))
+      (push (propertize "        Traceback:\n" 'face 'bold) parts)
+      (dolist (line traceback)
+        (push (propertize (concat "        " line "\n") 'face 'default) parts)))
+
+    ;; Add error lines
+    (when-let* ((error-lines (plist-get details :error-lines)))
+      (dolist (line error-lines)
+        (push (propertize (concat "        " line "\n") 'face 'error) parts)))
+
+    ;; Add location
+    (when-let* ((location (plist-get details :location)))
+      (push (propertize (concat "        " location "\n") 'face 'warning) parts))
+
+    ;; Add captured stdout
+    (when-let* ((stdout (plist-get details :stdout)))
+      (push "\n" parts)
+      (push (propertize "        Captured stdout:\n" 'face 'bold) parts)
+      (dolist (line (split-string stdout "\n"))
+        (push (propertize (concat "        " line "\n") 'face 'default) parts)))
+
+    ;; Add captured stderr
+    (when-let* ((stderr (plist-get details :stderr)))
+      (push "\n" parts)
+      (push (propertize "        Captured stderr:\n" 'face 'bold) parts)
+      (dolist (line (split-string stderr "\n"))
+        (push (propertize (concat "        " line "\n") 'face 'error) parts)))
+
+    ;; Add newline at start and end
+    (concat "\n" (apply #'concat (nreverse parts)) "\n")))
+
+(defun touchstone--create-details-overlay (result position)
+  "Create a collapsible overlay for test RESULT at POSITION."
+  (let* ((details (plist-get result :details))
+         (details-text (touchstone--format-details details))
+         (start position)
+         (end position))
+    ;; Insert the details text (invisible by default)
+    (save-excursion
+      (goto-char position)
+      (insert details-text)
+      (setq end (point)))
+    ;; Create overlay to make it collapsible
+    (let ((ov (make-overlay start end)))
+      (overlay-put ov 'invisible t)
+      (overlay-put ov 'touchstone-details t)
+      (overlay-put ov 'evaporate t)
+      ;; Store overlay reference in the result
+      (plist-put result :overlay ov))))
+
+(defun touchstone--toggle-details-at-point ()
+  "Toggle visibility of test details at point."
+  (interactive)
+  (let* ((line-start (line-beginning-position))
+         (line-end (line-end-position))
+         ;; Get the test identifier from the text property
+         (test-id (get-text-property line-start 'touchstone-test-id)))
+    (if (and test-id
+             (gethash test-id touchstone--test-results))
+        (let* ((result (gethash test-id touchstone--test-results))
+               (overlay (plist-get result :overlay)))
+          (if overlay
+              (let ((currently-invisible (overlay-get overlay 'invisible)))
+                (overlay-put overlay 'invisible (not currently-invisible))
+                ;; Update the indicator on the test line
+                (save-excursion
+                  (goto-char line-start)
+                  (when (looking-at "\\[.\\] ")
+                    (let ((inhibit-read-only t)
+                          (new-indicator (if currently-invisible "[-] " "[+] ")))
+                      (delete-char 4)  ; Delete all 4 chars: [+] or [-] plus space
+                      (insert (propertize new-indicator 'touchstone-test-id test-id))))))
+            (message "No details available for this test")))
+      (message "Not on a test result line"))))
 
 (defun touchstone--display-results-buffer ()
   "Display the touchstone results buffer."
@@ -322,11 +534,22 @@ Handles process completion and errors based on EVENT."
     (define-key map (kbd "k") #'touchstone-kill-process)
     (define-key map (kbd "n") #'next-line)
     (define-key map (kbd "p") #'previous-line)
+    (define-key map (kbd "TAB") #'touchstone--toggle-details-at-point)
+    (define-key map (kbd "RET") #'touchstone--toggle-details-at-point)
     map)
   "Keymap for `touchstone-mode'.")
 
 (define-derived-mode touchstone-mode special-mode "Touchstone"
   "Major mode for touchstone test results.
+
+Key bindings:
+\\<touchstone-mode-map>
+\\[quit-window] - Quit window
+\\[touchstone-run-tests] - Rerun tests
+\\[touchstone-kill-process] - Kill running test process
+\\[touchstone--toggle-details-at-point] - Toggle test details (TAB or RET)
+\\[next-line] - Next line
+\\[previous-line] - Previous line
 
 \\{touchstone-mode-map}"
   (setq buffer-read-only t)
