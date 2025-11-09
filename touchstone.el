@@ -62,6 +62,7 @@ Each backend is a plist with the following keys:
   :build-command - Function (root) -> command-list to build test command
   :create-parser-state - Function () -> initial parser state plist
   :parse-line    - Function (line state) -> (result . new-state)
+                   Result must be a plist with: :id, :file, :test, :status
   :finish        - Function (state) -> () to finalize parsing on process exit
   :priority      - Integer priority (higher = checked first)")
 
@@ -126,23 +127,17 @@ Returns backend plist or nil if no backend matches."
 
 (defvar touchstone--test-results nil
   "Hash table mapping test identifiers to result data.
-Keys are strings like \"file::test_name\".
-Values are plists with :file, :test, :status, :marker, :details.")
+Keys are backend-specific test identifier strings.
+Values are plists with :id, :file, :test, :status, :marker, :details.")
 
 ;;; Test Result Formatting
 
-(defun touchstone--test-identifier (file test)
-  "Create a test identifier from FILE and TEST name.
-Note: This uses '::' separator which is pytest-specific.
-TODO: Make this backend-specific or configurable."
-  (concat file "::" test))
-
 (defun touchstone--format-test-result (result)
   "Format a parsed test RESULT as a display line."
-  (let* ((file (plist-get result :file))
+  (let* ((identifier (plist-get result :id))
+         (file (plist-get result :file))
          (test (plist-get result :test))
          (status (plist-get result :status))
-         (identifier (touchstone--test-identifier file test))
          (has-details (and (member status '("FAILED" "ERROR"))
                           (plist-get result :details)))
          (status-face (cond
@@ -331,9 +326,7 @@ Handles process completion and errors based on EVENT."
 
 (defun touchstone--display-test-result (result)
   "Display a formatted test RESULT in the results buffer."
-  (let* ((file (plist-get result :file))
-         (test (plist-get result :test))
-         (identifier (touchstone--test-identifier file test)))
+  (let ((identifier (plist-get result :id)))
     (with-current-buffer (touchstone--get-results-buffer)
       (let ((inhibit-read-only t))
         (save-excursion
@@ -401,9 +394,7 @@ Handles process completion and errors based on EVENT."
   "Create a collapsible overlay for test RESULT at POSITION."
   (let* ((details (plist-get result :details))
          (details-text (touchstone--format-details details))
-         (file (plist-get result :file))
-         (test (plist-get result :test))
-         (identifier (touchstone--test-identifier file test))
+         (identifier (plist-get result :id))
          (start position)
          (end position))
     ;; Insert the details text (invisible by default)

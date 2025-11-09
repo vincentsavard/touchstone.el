@@ -100,13 +100,17 @@ Returns a plist containing parser state variables."
 
 (defun touchstone-pytest--parse-test-line (line)
   "Parse a pytest test result LINE.
-Returns a plist with :file, :test, and :status, or nil if not a test result line."
+Returns a plist with :id, :file, :test, and :status, or nil if not a test result line."
   (when (string-match
          "^\\(.*?\\)::\\(.*?\\) \\(PASSED\\|FAILED\\|SKIPPED\\|ERROR\\)"
          line)
-    (list :file (match-string 1 line)
-          :test (match-string 2 line)
-          :status (match-string 3 line))))
+    (let ((file (match-string 1 line))
+          (test (match-string 2 line))
+          (status (match-string 3 line)))
+      (list :id (touchstone-pytest--test-identifier file test)
+            :file file
+            :test test
+            :status status))))
 
 (defun touchstone-pytest--parse-failure-line (line state)
   "Parse a LINE from the FAILURES section using parser STATE.
