@@ -8,8 +8,9 @@
 ;; Add parent directory to load path
 (add-to-list 'load-path (file-name-directory (directory-file-name (file-name-directory load-file-name))))
 
-;; Load touchstone
+;; Load touchstone and pytest backend
 (require 'touchstone)
+(require 'touchstone-backend-pytest)
 
 (defvar touchstone-test-dir
   (file-name-directory (or load-file-name buffer-file-name))
@@ -29,11 +30,19 @@
 (defun touchstone-test-simulate-output (output)
   "Simulate pytest OUTPUT by processing it line-by-line through the parser.
 This mimics what the process filter would do."
-  (let ((lines (split-string output "\n" t)))
-    (dolist (line lines)
-      (touchstone--process-line line))
-    ;; Simulate process completion
-    (touchstone--finish-current-failure)))
+  ;; Select pytest backend for testing
+  (let ((backend (cdr (assq 'pytest touchstone--backends))))
+    (setq touchstone--current-backend backend)
+    ;; Initialize parser state
+    (let ((create-state-fn (plist-get backend :create-parser-state)))
+      (setq touchstone--parser-state (funcall create-state-fn)))
+    ;; Process lines
+    (let ((lines (split-string output "\n" t)))
+      (dolist (line lines)
+        (touchstone--process-line line)))
+    ;; Finalize parsing (simulates process exit)
+    (let ((finish-fn (plist-get backend :finish)))
+      (funcall finish-fn touchstone--parser-state))))
 
 (provide 'test-helper)
 

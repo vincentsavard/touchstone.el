@@ -19,28 +19,22 @@
 ;; Features:
 ;; - Async test execution (non-blocking)
 ;; - Automatic test runner detection
+;; - Pluggable backend architecture
 ;; - Real-time incremental result updates
 ;; - Collapsible test output for detailed inspection
 ;; - Clickable file paths for easy navigation
 ;;
-;; Currently supported test runners:
-;; - pytest (Python)
+;; Supported test runners:
+;; - pytest (Python) - via touchstone-backend-pytest.el
 ;;
 ;; Usage:
 ;;   M-x touchstone-run-tests
 ;;
+;; The appropriate backend will be automatically detected and used.
+;;
 ;; Configuration:
-;;   By default, pytest is run via uv: '("uv" "run" "pytest")
-;;   Customize `touchstone-pytest-executable` for other setups:
-;;
-;;   ;; For poetry:
-;;   (setq touchstone-pytest-executable '("poetry" "run" "pytest"))
-;;
-;;   ;; For pipenv:
-;;   (setq touchstone-pytest-executable '("pipenv" "run" "pytest"))
-;;
-;;   ;; For direct pytest (no virtual env manager):
-;;   (setq touchstone-pytest-executable '("pytest"))
+;;   Backend-specific configuration is available in the respective backend files.
+;;   For pytest configuration, see touchstone-backend-pytest.el
 
 ;;; Code:
 
@@ -58,24 +52,60 @@
   :type 'string
   :group 'touchstone)
 
-(defcustom touchstone-pytest-executable '("uv" "run" "pytest")
-  "Command to run pytest.
-This should be a list of strings representing the command and any prefix.
+;;; Backend Protocol & Registry
 
-Examples:
-  - For uv (default): '(\"uv\" \"run\" \"pytest\")
-  - For poetry: '(\"poetry\" \"run\" \"pytest\")
-  - For pipenv: '(\"pipenv\" \"run\" \"pytest\")
-  - Direct pytest: '(\"pytest\")
+(defvar touchstone--backends nil
+  "List of registered test runner backends.
+Each backend is a plist with the following keys:
+  :name          - Symbol identifying the backend (e.g., 'pytest)
+  :detect        - Function (root) -> t/nil to detect if backend applies
+  :build-command - Function (root) -> command-list to build test command
+  :create-parser-state - Function () -> initial parser state plist
+  :parse-line    - Function (line state) -> (result . new-state)
+  :finish        - Function (state) -> () to finalize parsing on process exit
+  :priority      - Integer priority (higher = checked first)")
 
-The command will be combined with `touchstone-pytest-args` when executing tests."
-  :type '(repeat string)
-  :group 'touchstone)
+(defvar touchstone--current-backend nil
+  "The currently selected backend for the active test run.")
 
-(defcustom touchstone-pytest-args '("-v" "--color=no" "-p" "no:progress")
-  "Default arguments to pass to pytest."
-  :type '(repeat string)
-  :group 'touchstone)
+(defvar touchstone--parser-state nil
+  "Current parser state for the active backend.")
+
+(defun touchstone-register-backend (name backend-plist)
+  "Register a test runner backend.
+NAME is a symbol identifying the backend.
+BACKEND-PLIST must contain:
+  :name          - Display name string
+  :detect        - Detection function
+  :build-command - Command builder function
+  :create-parser-state - Parser state initializer function
+  :parse-line    - Line parser function
+  :finish        - Finalization function
+  :priority      - Integer priority (optional, default 0)"
+  (let ((priority (or (plist-get backend-plist :priority) 0))
+        (existing (assq name touchstone--backends)))
+    ;; Remove existing registration if present
+    (when existing
+      (setq touchstone--backends (delq existing touchstone--backends)))
+    ;; Add new registration
+    (push (cons name backend-plist) touchstone--backends)
+    ;; Sort by priority (higher first)
+    (setq touchstone--backends
+          (sort touchstone--backends
+                (lambda (a b)
+                  (> (or (plist-get (cdr a) :priority) 0)
+                     (or (plist-get (cdr b) :priority) 0)))))))
+
+(defun touchstone--select-backend (root)
+  "Select appropriate backend for project at ROOT.
+Returns backend plist or nil if no backend matches."
+  (catch 'found
+    (dolist (backend touchstone--backends)
+      (let* ((backend-plist (cdr backend))
+             (detect-fn (plist-get backend-plist :detect)))
+        (when (and detect-fn (funcall detect-fn root))
+          (throw 'found backend-plist))))
+    nil))
 
 ;;; Variables
 
@@ -99,93 +129,13 @@ The command will be combined with `touchstone-pytest-args` when executing tests.
 Keys are strings like \"file::test_name\".
 Values are plists with :file, :test, :status, :marker, :details.")
 
-(defvar touchstone--parsing-failures nil
-  "Non-nil when we're inside the FAILURES section.")
-
-(defvar touchstone--current-failure nil
-  "Current failure being parsed (test identifier).")
-
-(defvar touchstone--current-failure-details nil
-  "Accumulator for current failure details.")
-
-;;; Pytest Output Parsing
-
-(defun touchstone--parse-pytest-line (line)
-  "Parse a pytest output LINE and return test result data.
-Returns a plist with :file, :test, and :status, or nil if not a test result line."
-  (when (string-match
-         "^\\(.*?\\)::\\(.*?\\) \\(PASSED\\|FAILED\\|SKIPPED\\|ERROR\\)"
-         line)
-    (list :file (match-string 1 line)
-          :test (match-string 2 line)
-          :status (match-string 3 line))))
+;;; Test Result Formatting
 
 (defun touchstone--test-identifier (file test)
-  "Create a test identifier from FILE and TEST name."
+  "Create a test identifier from FILE and TEST name.
+Note: This uses '::' separator which is pytest-specific.
+TODO: Make this backend-specific or configurable."
   (concat file "::" test))
-
-(defun touchstone--parse-failure-line (line)
-  "Parse a LINE from the FAILURES section."
-  (cond
-   ;; Start of a new failure block: _____ test_name _____
-   ((string-match "^_+ \\(.*\\) _+$" line)
-    (let ((test-name (match-string 1 line)))
-      (touchstone--finish-current-failure)
-      (setq touchstone--current-failure test-name)
-      (setq touchstone--current-failure-details
-            (list :traceback nil :error-lines nil :location nil :stdout nil :stderr nil))))
-
-   ;; Captured stdout section
-   ((string-match "^-+ Captured stdout call -+$" line)
-    (plist-put touchstone--current-failure-details :capturing-stdout t))
-
-   ;; Captured stderr section
-   ((string-match "^-+ Captured stderr call -+$" line)
-    (plist-put touchstone--current-failure-details :capturing-stdout nil)
-    (plist-put touchstone--current-failure-details :capturing-stderr t))
-
-   ;; File location line: tests/file.py:9: AssertionError
-   ((string-match "^\\([^:]+\\):\\([0-9]+\\): \\(.*\\)$" line)
-    (plist-put touchstone--current-failure-details :location line))
-
-   ;; Error detail line (starts with "E   ")
-   ((string-match "^E   " line)
-    (let ((error-lines (plist-get touchstone--current-failure-details :error-lines)))
-      (plist-put touchstone--current-failure-details :error-lines
-                 (append error-lines (list line)))))
-
-   ;; Captured output or traceback
-   (touchstone--current-failure
-    (cond
-     ((plist-get touchstone--current-failure-details :capturing-stdout)
-      (let ((stdout (plist-get touchstone--current-failure-details :stdout)))
-        (plist-put touchstone--current-failure-details :stdout
-                   (if stdout (concat stdout "\n" line) line))))
-
-     ((plist-get touchstone--current-failure-details :capturing-stderr)
-      (let ((stderr (plist-get touchstone--current-failure-details :stderr)))
-        (plist-put touchstone--current-failure-details :stderr
-                   (if stderr (concat stderr "\n" line) line))))
-
-     ;; Regular traceback line (indented)
-     ((string-match "^    " line)
-      (let ((traceback (plist-get touchstone--current-failure-details :traceback)))
-        (plist-put touchstone--current-failure-details :traceback
-                   (append traceback (list line)))))))))
-
-(defun touchstone--finish-current-failure ()
-  "Finish parsing the current failure and store its details."
-  (when touchstone--current-failure
-    ;; Find the test result by matching the test name
-    ;; The failure header might be just the test name, we need to find the full identifier
-    (maphash
-     (lambda (key value)
-       (when (string-suffix-p touchstone--current-failure key)
-         (puthash key (plist-put value :details touchstone--current-failure-details) touchstone--test-results)
-         (touchstone--update-test-display key)))
-     touchstone--test-results)
-    (setq touchstone--current-failure nil)
-    (setq touchstone--current-failure-details nil)))
 
 (defun touchstone--format-test-result (result)
   "Format a parsed test RESULT as a display line."
@@ -215,26 +165,13 @@ Returns a plist with :file, :test, and :status, or nil if not a test result line
 
 ;;; Project Detection
 
-(defun touchstone--find-dominating-file-with-content (file regexp)
-  "Search up directory tree for FILE containing REGEXP.
-Returns the directory containing the file, or nil if not found."
-  (let ((dir (locate-dominating-file default-directory file)))
-    (when dir
-      (let ((file-path (expand-file-name file dir)))
-        (when (file-exists-p file-path)
-          (with-temp-buffer
-            (insert-file-contents file-path)
-            (when (re-search-forward regexp nil t)
-              dir)))))))
-
 (defun touchstone--find-project-root ()
   "Find the project root directory.
 Uses the following methods in order:
 1. project.el (if available)
 2. projectile (if available)
 3. Git root
-4. Directory containing pytest.ini, pyproject.toml, or setup.cfg
-5. Current directory"
+4. Current directory"
   (or touchstone--project-root
       (setq touchstone--project-root
             (or
@@ -249,14 +186,6 @@ Uses the following methods in order:
                (ignore-errors (projectile-project-root)))
              ;; Try git root
              (locate-dominating-file default-directory ".git")
-             ;; Try pytest config files
-             (locate-dominating-file default-directory "pytest.ini")
-             (touchstone--find-dominating-file-with-content
-              "pyproject.toml" "\\[tool\\.pytest")
-             (touchstone--find-dominating-file-with-content
-              "setup.cfg" "\\[tool:pytest\\]")
-             ;; Try tests directory
-             (locate-dominating-file default-directory "tests")
              ;; Fall back to current directory
              default-directory))))
 
@@ -311,26 +240,18 @@ Accumulates STRING output and updates the results buffer incrementally."
           (setq touchstone--line-buffer partial-line))))))
 
 (defun touchstone--process-line (line)
-  "Process a complete LINE from pytest output.
-Handles test results, failure details, and section markers."
-  (cond
-   ;; Check for FAILURES section start
-   ((string-match "^=+ FAILURES =+$" line)
-    (setq touchstone--parsing-failures t))
-
-   ;; Check for end of FAILURES section (short test summary or final summary)
-   ((string-match "^=+ \\(short test summary\\|[0-9].* in [0-9]\\)" line)
-    (touchstone--finish-current-failure)
-    (setq touchstone--parsing-failures nil))
-
-   ;; Inside FAILURES section
-   (touchstone--parsing-failures
-    (touchstone--parse-failure-line line))
-
-   ;; Test result line (outside FAILURES section)
-   (t
-    (when-let* ((result (touchstone--parse-pytest-line line)))
-      (touchstone--display-test-result result)))))
+  "Process a complete LINE of test output using the current backend.
+Updates parser state and displays test results."
+  (when touchstone--current-backend
+    (let* ((parse-fn (plist-get touchstone--current-backend :parse-line))
+           (result-and-state (funcall parse-fn line touchstone--parser-state))
+           (result (car result-and-state))
+           (new-state (cdr result-and-state)))
+      ;; Update parser state
+      (setq touchstone--parser-state new-state)
+      ;; Display result if one was returned
+      (when result
+        (touchstone--display-test-result result)))))
 
 (defun touchstone--process-sentinel (proc event)
   "Process sentinel for touchstone test process PROC.
@@ -342,9 +263,10 @@ Handles process completion and errors based on EVENT."
                (eq status 'exit))
       (touchstone--process-line touchstone--line-buffer)
       (setq touchstone--line-buffer ""))
-    ;; Finish any pending failure parsing
-    (when (eq status 'exit)
-      (touchstone--finish-current-failure))
+    ;; Finalize backend parsing on process exit
+    (when (and (eq status 'exit) touchstone--current-backend)
+      (let ((finish-fn (plist-get touchstone--current-backend :finish)))
+        (funcall finish-fn touchstone--parser-state)))
     (cond
      ((eq status 'exit)
       (touchstone--handle-process-complete exit-code))
@@ -402,9 +324,10 @@ Handles process completion and errors based on EVENT."
       (setq touchstone--output-buffer "")
       (setq touchstone--line-buffer "")
       (setq touchstone--test-results (make-hash-table :test 'equal))
-      (setq touchstone--parsing-failures nil)
-      (setq touchstone--current-failure nil)
-      (setq touchstone--current-failure-details nil))))
+      ;; Initialize backend parser state if backend is selected
+      (when touchstone--current-backend
+        (let ((create-state-fn (plist-get touchstone--current-backend :create-parser-state)))
+          (setq touchstone--parser-state (funcall create-state-fn)))))))
 
 (defun touchstone--display-test-result (result)
   "Display a formatted test RESULT in the results buffer."
@@ -603,12 +526,26 @@ Key bindings:
   (interactive)
   (touchstone--kill-process)
   (touchstone--reset-project-root)
-  (touchstone--init-results-buffer)
-  (touchstone--display-results-buffer)
-  (setq touchstone--process
-        (touchstone--make-process
-         (append touchstone-pytest-executable touchstone-pytest-args)))
-  (message "Running tests..."))
+
+  ;; Find project root and select backend
+  (let* ((root (touchstone--find-project-root))
+         (backend (touchstone--select-backend root)))
+    (if (not backend)
+        (error "No test backend found for this project")
+      ;; Set current backend
+      (setq touchstone--current-backend backend)
+
+      ;; Initialize results buffer (this also initializes parser state)
+      (touchstone--init-results-buffer)
+      (touchstone--display-results-buffer)
+
+      ;; Build command using backend
+      (let* ((build-command-fn (plist-get backend :build-command))
+             (command-list (funcall build-command-fn root)))
+        ;; Create and start the process
+        (setq touchstone--process
+              (touchstone--make-process command-list))
+        (message "Running tests with %s..." (plist-get backend :name))))))
 
 ;;;###autoload
 (defun touchstone-kill-process ()
