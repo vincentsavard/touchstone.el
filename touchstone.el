@@ -154,29 +154,33 @@ Values are plists with :id, :file, :test, :status, :marker, :details.")
 
 ;;; Test Result Formatting
 
+(defun touchstone--normalize-status (status)
+  "Normalize STATUS to a 4-character display code.
+PASSED -> PASS, FAILED -> FAIL, ERROR -> ERR!, SKIPPED -> SKIP."
+  (cond
+   ((string= status "PASSED") "PASS")
+   ((string= status "FAILED") "FAIL")
+   ((string= status "ERROR") "ERR!")
+   ((string= status "SKIPPED") "SKIP")
+   (t status)))
+
 (defun touchstone--format-test-result (result)
   "Format a parsed test RESULT as a display line."
   (let* ((identifier (plist-get result :id))
-         (file (plist-get result :file))
-         (test (plist-get result :test))
          (status (plist-get result :status))
-         (has-details (and (member status '("FAILED" "ERROR"))
-                          (plist-get result :details)))
+         (normalized-status (touchstone--normalize-status status))
+         (has-details (plist-get result :details))
+         (indicator (if has-details "+" " "))
          (status-face (cond
-                       ((string= status "PASSED") 'success)
-                       ((string= status "FAILED") 'error)
-                       ((string= status "SKIPPED") 'warning)
-                       ((string= status "ERROR") 'error))))
+                       ((string= normalized-status "PASS") 'success)
+                       ((string= normalized-status "FAIL") 'error)
+                       ((string= normalized-status "SKIP") 'warning)
+                       ((string= normalized-status "ERR!") 'error))))
     (propertize
      (concat
-      (if has-details
-          (propertize "[+] " 'face 'shadow)
-        "    ")
-      (propertize file 'face 'default)
-      "::"
-      (propertize test 'face 'default)
+      (propertize (concat normalized-status indicator) 'face status-face)
       " "
-      (propertize (format "[%s]" status) 'face status-face)
+      identifier
       "\n")
      'touchstone-test-id identifier)))
 
@@ -444,14 +448,15 @@ If point is within details, collapse them and move to the test line."
         (if overlay
             (let ((currently-invisible (overlay-get overlay 'invisible)))
               (overlay-put overlay 'invisible (not currently-invisible))
-              ;; Update the indicator on the test line
+              ;; Update the indicator on the test line (character at position 4)
               (save-excursion
                 (goto-char line-start)
-                (when (looking-at "\\[.\\] ")
+                (when (looking-at "^....[+-]")
                   (let ((inhibit-read-only t)
-                        (new-indicator (if currently-invisible "[-] " "[+] ")))
-                    (delete-char 4)
-                    (insert (propertize new-indicator 'touchstone-test-id test-id-from-line))))))
+                        (new-indicator (if currently-invisible "-" "+")))
+                    (forward-char 4)
+                    (delete-char 1)
+                    (insert new-indicator)))))
           (message "No details available for this test"))))
 
      ;; Case 2: We're within a details overlay
@@ -465,13 +470,14 @@ If point is within details, collapse them and move to the test line."
                           (point))))
         ;; Collapse the details
         (overlay-put details-overlay 'invisible t)
-        ;; Update the indicator on the test line
+        ;; Update the indicator on the test line (character at position 4)
         (save-excursion
           (goto-char line-start)
-          (when (looking-at "\\[.\\] ")
+          (when (looking-at "^....-")
             (let ((inhibit-read-only t))
-              (delete-char 4)
-              (insert (propertize "[+] " 'touchstone-test-id test-id-from-overlay)))))
+              (forward-char 4)
+              (delete-char 1)
+              (insert "+"))))
         ;; Move point to the start of the test line
         (goto-char line-start)))
 

@@ -25,13 +25,13 @@
 
       ;; Validate buffer contains test results
       (let ((buffer-contents (buffer-string)))
-        (should (string-match-p "tests/test_example\\.py::test_one.*PASSED" buffer-contents))
-        (should (string-match-p "tests/test_example\\.py::test_two.*PASSED" buffer-contents))
-        (should (string-match-p "tests/test_example\\.py::test_three.*PASSED" buffer-contents))
-        (should (string-match-p "tests/test_example\\.py::test_four.*PASSED" buffer-contents))
+        (should (string-match-p "PASS  tests/test_example\\.py::test_one" buffer-contents))
+        (should (string-match-p "PASS  tests/test_example\\.py::test_two" buffer-contents))
+        (should (string-match-p "PASS  tests/test_example\\.py::test_three" buffer-contents))
+        (should (string-match-p "PASS  tests/test_example\\.py::test_four" buffer-contents))
 
-        ;; Validate no [+] indicators (no failures)
-        (should-not (string-match-p "\\[+\\]" buffer-contents)))
+        ;; Validate no + indicators (no failures with details)
+        (should-not (string-match-p "\\+" buffer-contents)))
 
       ;; Validate each test has correct metadata
       (maphash
@@ -57,10 +57,10 @@
 
       ;; Validate buffer contains all test results with correct statuses
       (let ((buffer-contents (buffer-string)))
-        (should (string-match-p "test_one.*PASSED" buffer-contents))
-        (should (string-match-p "test_two.*FAILED" buffer-contents))
-        (should (string-match-p "test_three.*PASSED" buffer-contents))
-        (should (string-match-p "test_four.*FAILED" buffer-contents)))
+        (should (string-match-p "PASS  tests/test_example\\.py::test_one" buffer-contents))
+        (should (string-match-p "FAIL\\+ tests/test_example\\.py::test_two" buffer-contents))
+        (should (string-match-p "PASS  tests/test_example\\.py::test_three" buffer-contents))
+        (should (string-match-p "FAIL\\+ tests/test_example\\.py::test_four" buffer-contents)))
 
       ;; Validate individual test metadata and details
       (let ((test-one (gethash "tests/test_example.py::test_one" touchstone--test-results))
