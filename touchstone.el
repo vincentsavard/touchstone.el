@@ -511,14 +511,8 @@ If point is within details, collapse them and move to the test line."
 (define-derived-mode touchstone-mode special-mode "Touchstone"
   "Major mode for touchstone test results.
 
-Key bindings:
-\\<touchstone-mode-map>
-\\[quit-window] - Quit window
-\\[touchstone-run-tests] - Rerun tests
-\\[touchstone-kill-process] - Kill running test process
-\\[touchstone--toggle-details-at-point] - Toggle test details (TAB or RET)
-\\[next-line] - Next line
-\\[previous-line] - Previous line
+Displays test results in a clean, status-first format.
+Press TAB or RET on a test to toggle its details.
 
 \\{touchstone-mode-map}"
   (setq buffer-read-only t)
