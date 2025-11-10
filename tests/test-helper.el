@@ -10,7 +10,7 @@
 
 ;; Load touchstone and pytest backend
 (require 'touchstone)
-(require 'touchstone-backend-pytest)
+(require 'touchstone-pytest)
 
 (defvar touchstone-test-dir
   (file-name-directory (or load-file-name buffer-file-name))

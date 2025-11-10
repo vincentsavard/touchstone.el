@@ -1,4 +1,4 @@
-;;; touchstone-backend-pytest.el --- Pytest backend for touchstone -*- lexical-binding: t; -*-
+;;; touchstone-pytest.el --- Pytest backend for touchstone -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2025
 
@@ -241,6 +241,6 @@ Returns (RESULT . NEW-STATE) where RESULT is a test result plist or nil."
        :finish #'touchstone-pytest--finish
        :priority 10))
 
-(provide 'touchstone-backend-pytest)
+(provide 'touchstone-pytest)
 
-;;; touchstone-backend-pytest.el ends here
+;;; touchstone-pytest.el ends here

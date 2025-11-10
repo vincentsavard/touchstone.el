@@ -25,7 +25,7 @@
 ;; - Clickable file paths for easy navigation
 ;;
 ;; Supported test runners:
-;; - pytest (Python) - via touchstone-backend-pytest.el
+;; - pytest (Python) - via touchstone-pytest.el
 ;;
 ;; Usage:
 ;;   M-x touchstone-run-tests
@@ -34,7 +34,7 @@
 ;;
 ;; Configuration:
 ;;   Backend-specific configuration is available in the respective backend files.
-;;   For pytest configuration, see touchstone-backend-pytest.el
+;;   For pytest configuration, see touchstone-pytest.el
 
 ;;; Code:
 
