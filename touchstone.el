@@ -130,6 +130,23 @@ Returns backend plist or nil if no backend matches."
 Keys are backend-specific test identifier strings.
 Values are plists with :id, :file, :test, :status, :marker, :details.")
 
+(defvar-local touchstone--process-status nil
+  "Current status of the test process: 'running or 'done.")
+
+;;; Header Line
+
+(defun touchstone--format-header-line ()
+  "Format the header line for the touchstone buffer."
+  (pcase touchstone--process-status
+    ('running (propertize "Running..." 'face 'success))
+    ('done (propertize "Done" 'face 'shadow))
+    (_ "")))
+
+(defun touchstone--update-header (status)
+  "Update the header line with STATUS ('running or 'done)."
+  (setq touchstone--process-status status)
+  (force-mode-line-update))
+
 ;;; Test Result Formatting
 
 (defun touchstone--format-test-result (result)
@@ -271,25 +288,12 @@ Handles process completion and errors based on EVENT."
 (defun touchstone--handle-process-complete (exit-code)
   "Handle test process completion with EXIT-CODE."
   (with-current-buffer (touchstone--get-results-buffer)
-    (let ((inhibit-read-only t)
-          (message (cond
-                    ((zerop exit-code) "All tests passed")
-                    ((= exit-code 1) "Some tests failed")
-                    (t (format "Test run error (exit code: %d)" exit-code))))
-          (face (if (zerop exit-code) 'success 'error)))
-      (goto-char (point-max))
-      (insert "\n")
-      (insert (propertize (concat message "\n") 'face face)))))
+    (touchstone--update-header 'done)))
 
 (defun touchstone--handle-process-error (event)
   "Handle test process error with EVENT description."
   (with-current-buffer (touchstone--get-results-buffer)
-    (let ((inhibit-read-only t))
-      (goto-char (point-max))
-      (insert "\n")
-      (insert (propertize
-               (format "Test process error: %s\n" (string-trim event))
-               'face 'error)))))
+    (touchstone--update-header 'done)))
 
 (defun touchstone--kill-process ()
   "Kill the current touchstone test process if running."
@@ -314,15 +318,15 @@ Handles process completion and errors based on EVENT."
   (with-current-buffer (touchstone--get-results-buffer)
     (let ((inhibit-read-only t))
       (erase-buffer)
-      (insert (propertize "Running tests...\n\n"
-                          'face 'bold))
       (setq touchstone--output-buffer "")
       (setq touchstone--line-buffer "")
       (setq touchstone--test-results (make-hash-table :test 'equal))
       ;; Initialize backend parser state if backend is selected
       (when touchstone--current-backend
         (let ((create-state-fn (plist-get touchstone--current-backend :create-parser-state)))
-          (setq touchstone--parser-state (funcall create-state-fn)))))))
+          (setq touchstone--parser-state (funcall create-state-fn))))
+      ;; Update header to show running status
+      (touchstone--update-header 'running))))
 
 (defun touchstone--display-test-result (result)
   "Display a formatted test RESULT in the results buffer."
@@ -507,7 +511,8 @@ Key bindings:
 
 \\{touchstone-mode-map}"
   (setq buffer-read-only t)
-  (setq truncate-lines nil))
+  (setq truncate-lines nil)
+  (setq header-line-format '(:eval (touchstone--format-header-line))))
 
 ;;; Public Commands
 
