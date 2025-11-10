@@ -137,10 +137,15 @@ Values are plists with :id, :file, :test, :status, :marker, :details.")
 
 (defun touchstone--format-header-line ()
   "Format the header line for the touchstone buffer."
-  (pcase touchstone--process-status
-    ('running (propertize "Running..." 'face 'success))
-    ('done (propertize "Done" 'face 'shadow))
-    (_ "")))
+  (let ((backend-name (when touchstone--current-backend
+                        (plist-get touchstone--current-backend :name)))
+        (status-text (pcase touchstone--process-status
+                       ('running (propertize "Running..." 'face 'success))
+                       ('done (propertize "Done" 'face 'shadow))
+                       (_ ""))))
+    (if backend-name
+        (concat "[" backend-name "] " status-text)
+      status-text)))
 
 (defun touchstone--update-header (status)
   "Update the header line with STATUS ('running or 'done)."
