@@ -144,6 +144,25 @@ Returns (results . final-state) where results includes both
     (should (string= (plist-get result :test) "test_skip"))
     (should (eq (plist-get result :status) 'skipped))))
 
+(ert-deftest touchstone-pytest-test-parse-test-line-error ()
+  "Test parsing a single ERROR test line."
+  (let* ((backend (touchstone-pytest-test-get-backend))
+         (create-state-fn (plist-get backend :create-parser-state))
+         (parse-fn (plist-get backend :parse-line))
+         (state (funcall create-state-fn))
+         (line "tests/test_example.py::test_error ERROR")
+         (result-and-state (funcall parse-fn line state))
+         (result (car result-and-state)))
+
+    ;; Should have a result
+    (should result)
+
+    ;; Verify all fields
+    (should (string= (plist-get result :id) "tests/test_example.py::test_error"))
+    (should (string= (plist-get result :file) "tests/test_example.py"))
+    (should (string= (plist-get result :test) "test_error"))
+    (should (eq (plist-get result :status) 'error))))
+
 (provide 'touchstone-pytest-test)
 
 ;;; touchstone-pytest-test.el ends here
