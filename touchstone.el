@@ -145,7 +145,7 @@ Values are plists with :id, :file, :test, :status, :marker, :details.")
       status-text)))
 
 (defun touchstone--update-header (status)
-  "Update the header line with STATUS ('running or 'done)."
+  "Update the header line with STATUS ('running, 'done, or 'aborted)."
   (setq touchstone--process-status status)
   (force-mode-line-update))
 
