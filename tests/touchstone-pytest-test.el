@@ -320,6 +320,29 @@ Returns (results . final-state) where results includes both
         (should (plist-get details :location))
         (should (string-match-p "AssertionError" (plist-get details :location)))))))
 
+(ert-deftest touchstone-pytest-test-finish-no-pending ()
+  "Test that :finish returns nil when there's no pending data."
+  (let* ((backend (touchstone-pytest-test-get-backend))
+         (create-state-fn (plist-get backend :create-parser-state))
+         (parse-fn (plist-get backend :parse-line))
+         (finish-fn (plist-get backend :finish))
+         (state (funcall create-state-fn))
+         (lines '("tests/test_example.py::test_one PASSED"
+                  "tests/test_example.py::test_two PASSED"
+                  "tests/test_example.py::test_three PASSED")))
+
+    ;; Process only test result lines
+    (dolist (line lines)
+      (let ((result-and-state (funcall parse-fn line state)))
+        (setq state (cdr result-and-state))))
+
+    ;; Call :finish with no pending data
+    (let* ((result-and-state (funcall finish-fn state))
+           (result (car result-and-state)))
+
+      ;; Should have no result
+      (should-not result))))
+
 (provide 'touchstone-pytest-test)
 
 ;;; touchstone-pytest-test.el ends here
