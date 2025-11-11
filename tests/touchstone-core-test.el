@@ -118,6 +118,26 @@ RESULTS is a list of test result plists to return."
 
   (should (touchstone-core-test-buffer-contains "FAIL+ file.txt::test_two")))
 
+(ert-deftest touchstone-core-test-detail-updates-existing-test ()
+  "Test that detail result updates previously displayed test."
+  (touchstone-core-test-register-fake-backend
+   (list (list :id "file.txt::test_one"
+               :file "file.txt"
+               :test "test_one"
+               :status 'passed)
+         (list :id "file.txt::test_two"
+               :file "file.txt"
+               :test "test_two"
+               :status 'failed)
+         (list :test "test_two"
+               :details (list :message "error message"))))
+
+  (touchstone-run-tests)
+  (touchstone-core-test-wait-for-process)
+
+  (should (touchstone-core-test-buffer-contains "PASS  file.txt::test_one"))
+  (should (touchstone-core-test-buffer-contains "FAIL+ file.txt::test_two")))
+
 (provide 'touchstone-core-test)
 
 ;;; touchstone-core-test.el ends here
