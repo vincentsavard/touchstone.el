@@ -159,27 +159,25 @@ Values are plists with :id, :file, :test, :status, :marker, :details.")
 ;;; Test Result Formatting
 
 (defun touchstone--normalize-status (status)
-  "Normalize STATUS symbol to a 4-character display code.
-'passed -> PASS, 'failed -> FAIL, 'error -> ERR!, 'skipped -> SKIP."
+  "Normalize STATUS symbol to display code and face.
+Returns (DISPLAY-STRING . FACE).
+'passed -> (PASS . success), 'failed -> (FAIL . error), etc."
   (pcase status
-    ('passed "PASS")
-    ('failed "FAIL")
-    ('error "ERR!")
-    ('skipped "SKIP")
-    (_ "")))
+    ('passed (cons "PASS" 'success))
+    ('failed (cons "FAIL" 'error))
+    ('error (cons "ERR!" 'error))
+    ('skipped (cons "SKIP" 'warning))
+    (_ (cons "" 'default))))
 
 (defun touchstone--format-test-result (result)
   "Format a parsed test RESULT as a display line."
   (let* ((identifier (plist-get result :id))
          (status (plist-get result :status))
-         (normalized-status (touchstone--normalize-status status))
+         (status-and-face (touchstone--normalize-status status))
+         (normalized-status (car status-and-face))
+         (status-face (cdr status-and-face))
          (has-details (plist-get result :details))
-         (indicator (if has-details "+" " "))
-         (status-face (cond
-                       ((string= normalized-status "PASS") 'success)
-                       ((string= normalized-status "FAIL") 'error)
-                       ((string= normalized-status "SKIP") 'warning)
-                       ((string= normalized-status "ERR!") 'error))))
+         (indicator (if has-details "+" " ")))
     (propertize
      (concat
       (propertize normalized-status 'face status-face)
