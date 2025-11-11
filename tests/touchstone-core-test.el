@@ -103,6 +103,21 @@ RESULTS is a list of test result plists to return."
   (should (touchstone-core-test-buffer-contains "FAIL  file.txt::test_two"))
   (should (touchstone-core-test-buffer-contains "PASS  file.txt::test_three")))
 
+(ert-deftest touchstone-core-test-display-test-with-details ()
+  "Test that a test with details shows the + indicator."
+  (touchstone-core-test-register-fake-backend
+   (list (list :id "file.txt::test_two"
+               :file "file.txt"
+               :test "test_two"
+               :status 'failed)
+         (list :test "test_two"
+               :details (list :message "assertion failed"))))
+
+  (touchstone-run-tests)
+  (touchstone-core-test-wait-for-process)
+
+  (should (touchstone-core-test-buffer-contains "FAIL+ file.txt::test_two")))
+
 (provide 'touchstone-core-test)
 
 ;;; touchstone-core-test.el ends here
