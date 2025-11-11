@@ -172,6 +172,32 @@ RESULTS is a list of test result plists to return."
   (let ((header (touchstone-core-test-get-header-line)))
     (should (string-match-p (regexp-quote "Done") header))))
 
+(ert-deftest touchstone-core-test-multiple-details-for-same-test ()
+  "Test that details with multiple error lines are displayed in buffer."
+  (touchstone-core-test-register-fake-backend
+   (list (list :id "file.txt::test_one"
+               :file "file.txt"
+               :test "test_one"
+               :status 'failed)
+         (list :test "test_one"
+               :details (list :error-lines '("E   first error"
+                                             "E   second error")))))
+
+  (touchstone-run-tests)
+  (touchstone-core-test-wait-for-process)
+
+  (should (touchstone-core-test-buffer-contains "FAIL+ file.txt::test_one"))
+
+  (with-current-buffer (get-buffer touchstone-buffer-name)
+    (goto-char (point-min))
+    (search-forward "FAIL+")
+    (beginning-of-line)
+    (touchstone--toggle-details-at-point)
+
+    (let ((buffer-text (buffer-substring-no-properties (point-min) (point-max))))
+      (should (string-match-p (regexp-quote "first error") buffer-text))
+      (should (string-match-p (regexp-quote "second error") buffer-text)))))
+
 (provide 'touchstone-core-test)
 
 ;;; touchstone-core-test.el ends here
