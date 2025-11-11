@@ -222,6 +222,67 @@ Returns (results . final-state) where results includes both
         (should (plist-get details :location))
         (should (string-match-p "ValueError" (plist-get details :location)))))))
 
+(ert-deftest touchstone-pytest-test-parse-with-output-test-statuses ()
+  "Test parsing pytest output with captured output - verify test statuses."
+  (let* ((results-and-state (touchstone-pytest-test-load-and-process-fixture "pytest-with-output.txt"))
+         (results (car results-and-state))
+         (test-results (seq-filter (lambda (r) (plist-get r :id)) results)))
+
+    ;; Should have exactly 2 test results
+    (should (= (length test-results) 2))
+
+    ;; Extract test results by name
+    (let ((test-stdout (seq-find (lambda (r) (string= (plist-get r :test) "test_with_stdout")) test-results))
+          (test-stderr (seq-find (lambda (r) (string= (plist-get r :test) "test_with_stderr")) test-results)))
+
+      ;; Verify both tests were found
+      (should test-stdout)
+      (should test-stderr)
+
+      ;; Verify both tests have failed status
+      (should (eq (plist-get test-stdout :status) 'failed))
+      (should (eq (plist-get test-stderr :status) 'failed)))))
+
+(ert-deftest touchstone-pytest-test-parse-with-output-captured-stdout ()
+  "Test parsing pytest output with captured output - verify captured stdout."
+  (let* ((results-and-state (touchstone-pytest-test-load-and-process-fixture "pytest-with-output.txt"))
+         (results (car results-and-state))
+         (detail-results (seq-filter (lambda (r) (and (not (plist-get r :id))
+                                                       (plist-get r :test))) results)))
+
+    ;; Find the stdout test details
+    (let ((test-stdout-details (seq-find (lambda (r) (string= (plist-get r :test) "test_with_stdout")) detail-results)))
+
+      ;; Verify detail result exists
+      (should test-stdout-details)
+
+      ;; Verify captured stdout
+      (let ((details (plist-get test-stdout-details :details)))
+        (should details)
+        (should (plist-get details :stdout))
+        (should (string-match-p "Debug output line 1" (plist-get details :stdout)))
+        (should (string-match-p "Debug output line 2" (plist-get details :stdout)))))))
+
+(ert-deftest touchstone-pytest-test-parse-with-output-captured-stderr ()
+  "Test parsing pytest output with captured output - verify captured stderr."
+  (let* ((results-and-state (touchstone-pytest-test-load-and-process-fixture "pytest-with-output.txt"))
+         (results (car results-and-state))
+         (detail-results (seq-filter (lambda (r) (and (not (plist-get r :id))
+                                                       (plist-get r :test))) results)))
+
+    ;; Find the stderr test details
+    (let ((test-stderr-details (seq-find (lambda (r) (string= (plist-get r :test) "test_with_stderr")) detail-results)))
+
+      ;; Verify detail result exists
+      (should test-stderr-details)
+
+      ;; Verify captured stderr
+      (let ((details (plist-get test-stderr-details :details)))
+        (should details)
+        (should (plist-get details :stderr))
+        (should (string-match-p "Error message 1" (plist-get details :stderr)))
+        (should (string-match-p "Error message 2" (plist-get details :stderr)))))))
+
 (provide 'touchstone-pytest-test)
 
 ;;; touchstone-pytest-test.el ends here
