@@ -10,9 +10,10 @@
 
 ;;; Fake Backend Implementation
 
-(defun touchstone-core-test-create-fake-backend (results)
+(defun touchstone-core-test-create-fake-backend (results &optional finish-result)
   "Create a simple fake backend for testing core.
-RESULTS is a list of test result plists to return."
+RESULTS is a list of test result plists to return.
+FINISH-RESULT is an optional result to return from :finish."
   (list
    :name "fake"
    :detect (lambda (root) t)
@@ -27,15 +28,14 @@ RESULTS is a list of test result plists to return."
                              (remaining (cdr results)))
                          (cons result (plist-put state :results remaining)))
                      (cons nil state))))
-   :finish (lambda (state) (cons nil state))))
+   :finish (lambda (state) (cons finish-result state))))
 
 ;;; Helper Functions
 
-(defun touchstone-core-test-register-fake-backend (results)
-  "Register a fake backend that returns RESULTS."
-  (let ((backend (touchstone-core-test-create-fake-backend results)))
-    (touchstone-register-backend 'fake backend)
-    backend))
+(defun touchstone-core-test-register-fake-backend (backend)
+  "Register a fake BACKEND."
+  (touchstone-register-backend 'fake backend)
+  backend)
 
 (defun touchstone-core-test-wait-for-process ()
   "Wait for the touchstone process to complete."
@@ -64,10 +64,11 @@ RESULTS is a list of test result plists to return."
 (ert-deftest touchstone-core-test-display-single-passed-test ()
   "Test that a single passing test is displayed correctly."
   (touchstone-core-test-register-fake-backend
-   (list (list :id "file.txt::test_one"
-               :file "file.txt"
-               :test "test_one"
-               :status 'passed)))
+   (touchstone-core-test-create-fake-backend
+    (list (list :id "file.txt::test_one"
+                :file "file.txt"
+                :test "test_one"
+                :status 'passed))))
 
   (touchstone-run-tests)
   (touchstone-core-test-wait-for-process)
@@ -77,10 +78,11 @@ RESULTS is a list of test result plists to return."
 (ert-deftest touchstone-core-test-display-single-failed-test ()
   "Test that a single failing test is displayed correctly."
   (touchstone-core-test-register-fake-backend
-   (list (list :id "file.txt::test_two"
-               :file "file.txt"
-               :test "test_two"
-               :status 'failed)))
+   (touchstone-core-test-create-fake-backend
+    (list (list :id "file.txt::test_two"
+                :file "file.txt"
+                :test "test_two"
+                :status 'failed))))
 
   (touchstone-run-tests)
   (touchstone-core-test-wait-for-process)
@@ -90,18 +92,19 @@ RESULTS is a list of test result plists to return."
 (ert-deftest touchstone-core-test-display-multiple-tests ()
   "Test that multiple tests are displayed."
   (touchstone-core-test-register-fake-backend
-   (list (list :id "file.txt::test_one"
-               :file "file.txt"
-               :test "test_one"
-               :status 'passed)
-         (list :id "file.txt::test_two"
-               :file "file.txt"
-               :test "test_two"
-               :status 'failed)
-         (list :id "file.txt::test_three"
-               :file "file.txt"
-               :test "test_three"
-               :status 'passed)))
+   (touchstone-core-test-create-fake-backend
+    (list (list :id "file.txt::test_one"
+                :file "file.txt"
+                :test "test_one"
+                :status 'passed)
+          (list :id "file.txt::test_two"
+                :file "file.txt"
+                :test "test_two"
+                :status 'failed)
+          (list :id "file.txt::test_three"
+                :file "file.txt"
+                :test "test_three"
+                :status 'passed))))
 
   (touchstone-run-tests)
   (touchstone-core-test-wait-for-process)
@@ -113,12 +116,13 @@ RESULTS is a list of test result plists to return."
 (ert-deftest touchstone-core-test-display-test-with-details ()
   "Test that a test with details shows the + indicator."
   (touchstone-core-test-register-fake-backend
-   (list (list :id "file.txt::test_two"
-               :file "file.txt"
-               :test "test_two"
-               :status 'failed)
-         (list :test "test_two"
-               :details (list :message "assertion failed"))))
+   (touchstone-core-test-create-fake-backend
+    (list (list :id "file.txt::test_two"
+                :file "file.txt"
+                :test "test_two"
+                :status 'failed)
+          (list :test "test_two"
+                :details (list :error-lines '("E   assertion failed"))))))
 
   (touchstone-run-tests)
   (touchstone-core-test-wait-for-process)
@@ -128,16 +132,17 @@ RESULTS is a list of test result plists to return."
 (ert-deftest touchstone-core-test-detail-updates-existing-test ()
   "Test that detail result updates previously displayed test."
   (touchstone-core-test-register-fake-backend
-   (list (list :id "file.txt::test_one"
-               :file "file.txt"
-               :test "test_one"
-               :status 'passed)
-         (list :id "file.txt::test_two"
-               :file "file.txt"
-               :test "test_two"
-               :status 'failed)
-         (list :test "test_two"
-               :details (list :message "error message"))))
+   (touchstone-core-test-create-fake-backend
+    (list (list :id "file.txt::test_one"
+                :file "file.txt"
+                :test "test_one"
+                :status 'passed)
+          (list :id "file.txt::test_two"
+                :file "file.txt"
+                :test "test_two"
+                :status 'failed)
+          (list :test "test_two"
+                :details (list :error-lines '("E   error message"))))))
 
   (touchstone-run-tests)
   (touchstone-core-test-wait-for-process)
@@ -148,10 +153,11 @@ RESULTS is a list of test result plists to return."
 (ert-deftest touchstone-core-test-header-shows-backend-name ()
   "Test that header line shows backend name."
   (touchstone-core-test-register-fake-backend
-   (list (list :id "file.txt::test_one"
-               :file "file.txt"
-               :test "test_one"
-               :status 'passed)))
+   (touchstone-core-test-create-fake-backend
+    (list (list :id "file.txt::test_one"
+                :file "file.txt"
+                :test "test_one"
+                :status 'passed))))
 
   (touchstone-run-tests)
 
@@ -161,10 +167,11 @@ RESULTS is a list of test result plists to return."
 (ert-deftest touchstone-core-test-header-shows-done-status ()
   "Test that header updates to done status."
   (touchstone-core-test-register-fake-backend
-   (list (list :id "file.txt::test_one"
-               :file "file.txt"
-               :test "test_one"
-               :status 'passed)))
+   (touchstone-core-test-create-fake-backend
+    (list (list :id "file.txt::test_one"
+                :file "file.txt"
+                :test "test_one"
+                :status 'passed))))
 
   (touchstone-run-tests)
   (touchstone-core-test-wait-for-process)
@@ -175,13 +182,14 @@ RESULTS is a list of test result plists to return."
 (ert-deftest touchstone-core-test-multiple-details-for-same-test ()
   "Test that details with multiple error lines are displayed in buffer."
   (touchstone-core-test-register-fake-backend
-   (list (list :id "file.txt::test_one"
-               :file "file.txt"
-               :test "test_one"
-               :status 'failed)
-         (list :test "test_one"
-               :details (list :error-lines '("E   first error"
-                                             "E   second error")))))
+   (touchstone-core-test-create-fake-backend
+    (list (list :id "file.txt::test_one"
+                :file "file.txt"
+                :test "test_one"
+                :status 'failed)
+          (list :test "test_one"
+                :details (list :error-lines '("E   first error"
+                                              "E   second error"))))))
 
   (touchstone-run-tests)
   (touchstone-core-test-wait-for-process)
@@ -200,12 +208,52 @@ RESULTS is a list of test result plists to return."
 
 (ert-deftest touchstone-core-test-empty-input ()
   "Test that empty input produces empty buffer."
-  (touchstone-core-test-register-fake-backend '())
+  (touchstone-core-test-register-fake-backend
+   (touchstone-core-test-create-fake-backend '()))
 
   (touchstone-run-tests)
   (touchstone-core-test-wait-for-process)
 
   (should (string-empty-p (touchstone-core-test-get-buffer-text))))
+
+(ert-deftest touchstone-core-test-finish-returns-detail-updates-test ()
+  "Test that finish function result updates test with indicator."
+  (touchstone-core-test-register-fake-backend
+   (touchstone-core-test-create-fake-backend
+    (list (list :id "file.txt::test_one"
+                :file "file.txt"
+                :test "test_one"
+                :status 'failed))
+    (list :test "test_one"
+          :details (list :error-lines '("E   error from finish")))))
+
+  (touchstone-run-tests)
+  (touchstone-core-test-wait-for-process)
+
+  (should (touchstone-core-test-buffer-contains "FAIL+ file.txt::test_one")))
+
+(ert-deftest touchstone-core-test-finish-returns-detail-displays-content ()
+  "Test that finish function details are displayed in buffer."
+  (touchstone-core-test-register-fake-backend
+   (touchstone-core-test-create-fake-backend
+    (list (list :id "file.txt::test_one"
+                :file "file.txt"
+                :test "test_one"
+                :status 'failed))
+    (list :test "test_one"
+          :details (list :error-lines '("E   error from finish")))))
+
+  (touchstone-run-tests)
+  (touchstone-core-test-wait-for-process)
+
+  (with-current-buffer (get-buffer touchstone-buffer-name)
+    (goto-char (point-min))
+    (search-forward "FAIL+")
+    (beginning-of-line)
+    (touchstone--toggle-details-at-point)
+
+    (let ((buffer-text (buffer-substring-no-properties (point-min) (point-max))))
+      (should (string-match-p (regexp-quote "error from finish") buffer-text)))))
 
 (provide 'touchstone-core-test)
 
