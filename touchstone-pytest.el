@@ -191,14 +191,18 @@ Returns updated state."
 Returns updated STATE with current failure cleared."
   (when-let* ((current-failure (plist-get state :current-failure))
               (current-failure-details (plist-get state :current-failure-details)))
-    ;; Find the test result by matching the test name
-    (maphash
-     (lambda (key value)
-       (when (string-suffix-p current-failure key)
-         (puthash key (plist-put value :details current-failure-details)
-                  touchstone--test-results)
-         (touchstone--update-test-display key)))
-     touchstone--test-results))
+    ;; Find the test result by matching the test name exactly
+    (when-let* ((matching-key (catch 'found
+                                (maphash
+                                 (lambda (key value)
+                                   (when (string= current-failure (plist-get value :test))
+                                     (throw 'found key)))
+                                 touchstone--test-results)
+                                nil)))
+      (let ((result (gethash matching-key touchstone--test-results)))
+        (puthash matching-key (plist-put result :details current-failure-details)
+                 touchstone--test-results)
+        (touchstone--update-test-display matching-key))))
   ;; Clear current failure state
   (plist-put state :current-failure nil)
   (plist-put state :current-failure-details nil)
