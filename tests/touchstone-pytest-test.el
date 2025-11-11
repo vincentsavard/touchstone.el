@@ -283,6 +283,43 @@ Returns (results . final-state) where results includes both
         (should (string-match-p "Error message 1" (plist-get details :stderr)))
         (should (string-match-p "Error message 2" (plist-get details :stderr)))))))
 
+(ert-deftest touchstone-pytest-test-finish-with-pending-failure ()
+  "Test that :finish returns pending failure when process exits mid-parsing."
+  (let* ((backend (touchstone-pytest-test-get-backend))
+         (create-state-fn (plist-get backend :create-parser-state))
+         (parse-fn (plist-get backend :parse-line))
+         (finish-fn (plist-get backend :finish))
+         (state (funcall create-state-fn))
+         (lines '("tests/test.py::test_one FAILED"
+                  "=================================== FAILURES ==================================="
+                  "______________________________ test_one _______________________________"
+                  "    def test_one():"
+                  ">       assert False"
+                  "E       assert False"
+                  "tests/test.py:2: AssertionError")))
+
+    ;; Process lines without end-of-section marker
+    (dolist (line lines)
+      (let ((result-and-state (funcall parse-fn line state)))
+        (setq state (cdr result-and-state))))
+
+    ;; Call :finish with pending failure
+    (let* ((result-and-state (funcall finish-fn state))
+           (result (car result-and-state)))
+
+      ;; Should have a result
+      (should result)
+
+      ;; Should have :test and :details
+      (should (string= (plist-get result :test) "test_one"))
+      (should (plist-get result :details))
+
+      ;; Verify details contain parsed information
+      (let ((details (plist-get result :details)))
+        (should (plist-get details :error-lines))
+        (should (plist-get details :location))
+        (should (string-match-p "AssertionError" (plist-get details :location)))))))
+
 (provide 'touchstone-pytest-test)
 
 ;;; touchstone-pytest-test.el ends here
