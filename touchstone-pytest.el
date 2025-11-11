@@ -104,9 +104,14 @@ Returns a plist with :id, :file, :test, and :status, or nil if not a test result
   (when (string-match
          "^\\(.*?\\)::\\(.*?\\) \\(PASSED\\|FAILED\\|SKIPPED\\|ERROR\\)"
          line)
-    (let ((file (match-string 1 line))
-          (test (match-string 2 line))
-          (status (match-string 3 line)))
+    (let* ((file (match-string 1 line))
+           (test (match-string 2 line))
+           (status-string (match-string 3 line))
+           (status (cond
+                    ((string= status-string "PASSED") 'passed)
+                    ((string= status-string "FAILED") 'failed)
+                    ((string= status-string "ERROR") 'error)
+                    ((string= status-string "SKIPPED") 'skipped))))
       (list :id (touchstone-pytest--test-identifier file test)
             :file file
             :test test

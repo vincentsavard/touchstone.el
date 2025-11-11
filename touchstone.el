@@ -62,7 +62,11 @@ Each backend is a plist with the following keys:
   :build-command - Function (root) -> command-list to build test command
   :create-parser-state - Function () -> initial parser state plist
   :parse-line    - Function (line state) -> (result . new-state)
-                   Result must be a plist with: :id, :file, :test, :status
+                   Result must be a plist with:
+                     :id     - Backend-specific test identifier string
+                     :file   - Test file path
+                     :test   - Test name
+                     :status - Symbol: 'passed, 'failed, 'error, 'skipped, or nil
   :finish        - Function (state) -> () to finalize parsing on process exit
   :priority      - Integer priority (higher = checked first)")
 
@@ -155,14 +159,14 @@ Values are plists with :id, :file, :test, :status, :marker, :details.")
 ;;; Test Result Formatting
 
 (defun touchstone--normalize-status (status)
-  "Normalize STATUS to a 4-character display code.
-PASSED -> PASS, FAILED -> FAIL, ERROR -> ERR!, SKIPPED -> SKIP."
-  (cond
-   ((string= status "PASSED") "PASS")
-   ((string= status "FAILED") "FAIL")
-   ((string= status "ERROR") "ERR!")
-   ((string= status "SKIPPED") "SKIP")
-   (t status)))
+  "Normalize STATUS symbol to a 4-character display code.
+'passed -> PASS, 'failed -> FAIL, 'error -> ERR!, 'skipped -> SKIP."
+  (pcase status
+    ('passed "PASS")
+    ('failed "FAIL")
+    ('error "ERR!")
+    ('skipped "SKIP")
+    (_ "")))
 
 (defun touchstone--format-test-result (result)
   "Format a parsed test RESULT as a display line."
@@ -171,11 +175,12 @@ PASSED -> PASS, FAILED -> FAIL, ERROR -> ERR!, SKIPPED -> SKIP."
          (normalized-status (touchstone--normalize-status status))
          (has-details (plist-get result :details))
          (indicator (if has-details "+" " "))
-         (status-face (cond
-                       ((string= normalized-status "PASS") 'success)
-                       ((string= normalized-status "FAIL") 'error)
-                       ((string= normalized-status "SKIP") 'warning)
-                       ((string= normalized-status "ERR!") 'error))))
+         (status-face (pcase status
+                       ('passed 'success)
+                       ('failed 'error)
+                       ('skipped 'warning)
+                       ('error 'error)
+                       (_ 'default))))
     (propertize
      (concat
       (propertize (concat normalized-status indicator) 'face status-face)

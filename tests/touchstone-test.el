@@ -38,7 +38,7 @@
        (lambda (key value)
          (should (string= "tests/test_example.py" (plist-get value :file)))
          (should (member (plist-get value :test) '("test_one" "test_two" "test_three" "test_four")))
-         (should (string= "PASSED" (plist-get value :status)))
+         (should (eq 'passed (plist-get value :status)))
          (should-not (plist-get value :details)))
        touchstone--test-results))))
 
@@ -69,10 +69,10 @@
             (test-four (gethash "tests/test_example.py::test_four" touchstone--test-results)))
 
         ;; Check statuses
-        (should (string= "PASSED" (plist-get test-one :status)))
-        (should (string= "FAILED" (plist-get test-two :status)))
-        (should (string= "PASSED" (plist-get test-three :status)))
-        (should (string= "FAILED" (plist-get test-four :status)))
+        (should (eq 'passed (plist-get test-one :status)))
+        (should (eq 'failed (plist-get test-two :status)))
+        (should (eq 'passed (plist-get test-three :status)))
+        (should (eq 'failed (plist-get test-four :status)))
 
         ;; Passed tests should have no details
         (should-not (plist-get test-one :details))
@@ -111,8 +111,8 @@
       (let ((test-stdout (gethash "test_output.py::test_with_stdout" touchstone--test-results))
             (test-stderr (gethash "test_output.py::test_with_stderr" touchstone--test-results)))
 
-        (should (string= "FAILED" (plist-get test-stdout :status)))
-        (should (string= "FAILED" (plist-get test-stderr :status)))
+        (should (eq 'failed (plist-get test-stdout :status)))
+        (should (eq 'failed (plist-get test-stderr :status)))
 
         ;; Both should have details
         (should (plist-get test-stdout :details))
