@@ -167,7 +167,7 @@ Returns (DISPLAY-STRING . FACE).
     ('failed (cons "FAIL" 'error))
     ('error (cons "ERR!" 'error))
     ('skipped (cons "SKIP" 'warning))
-    (_ (cons "" 'default))))
+    (_ (cons "????" 'shadow))))
 
 (defun touchstone--format-test-result (result)
   "Format a parsed test RESULT as a display line."
