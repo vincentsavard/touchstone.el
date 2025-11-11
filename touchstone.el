@@ -175,15 +175,15 @@ Values are plists with :id, :file, :test, :status, :marker, :details.")
          (normalized-status (touchstone--normalize-status status))
          (has-details (plist-get result :details))
          (indicator (if has-details "+" " "))
-         (status-face (pcase status
-                       ('passed 'success)
-                       ('failed 'error)
-                       ('skipped 'warning)
-                       ('error 'error)
-                       (_ 'default))))
+         (status-face (cond
+                       ((string= normalized-status "PASS") 'success)
+                       ((string= normalized-status "FAIL") 'error)
+                       ((string= normalized-status "SKIP") 'warning)
+                       ((string= normalized-status "ERR!") 'error))))
     (propertize
      (concat
-      (propertize (concat normalized-status indicator) 'face status-face)
+      (propertize normalized-status 'face status-face)
+      indicator
       " "
       identifier
       "\n")
