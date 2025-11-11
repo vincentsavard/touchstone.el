@@ -135,7 +135,10 @@ Keys are backend-specific test identifier strings.
 Values are plists with :id, :file, :test, :status, :marker, :details.")
 
 (defvar-local touchstone--process-status nil
-  "Current status of the test process: 'running or 'done.")
+  "Current status of the test process: 'running, 'done, or 'aborted.")
+
+(defvar-local touchstone--user-aborted nil
+  "Flag indicating whether the user aborted the current test process.")
 
 ;;; Header Line
 
@@ -146,6 +149,7 @@ Values are plists with :id, :file, :test, :status, :marker, :details.")
         (status-text (pcase touchstone--process-status
                        ('running (propertize "Running..." 'face 'success))
                        ('done (propertize "Done" 'face 'shadow))
+                       ('aborted (propertize "Aborted" 'face 'warning))
                        (_ ""))))
     (if backend-name
         (concat "[" backend-name "] " status-text)
@@ -300,17 +304,24 @@ Handles process completion and errors based on EVENT."
 (defun touchstone--handle-process-complete (exit-code)
   "Handle test process completion with EXIT-CODE."
   (with-current-buffer (touchstone--get-results-buffer)
+    (setq touchstone--user-aborted nil)
     (touchstone--update-header 'done)))
 
 (defun touchstone--handle-process-error (event)
   "Handle test process error with EVENT description."
   (with-current-buffer (touchstone--get-results-buffer)
-    (touchstone--update-header 'done)))
+    (if touchstone--user-aborted
+        (progn
+          (setq touchstone--user-aborted nil)
+          (touchstone--update-header 'aborted))
+      (touchstone--update-header 'done))))
 
 (defun touchstone--kill-process ()
   "Kill the current touchstone test process if running."
   (when (and touchstone--process
              (process-live-p touchstone--process))
+    (with-current-buffer (touchstone--get-results-buffer)
+      (setq touchstone--user-aborted t))
     (kill-process touchstone--process)
     (setq touchstone--process nil)))
 
@@ -333,6 +344,7 @@ Handles process completion and errors based on EVENT."
       (setq touchstone--output-buffer "")
       (setq touchstone--line-buffer "")
       (setq touchstone--test-results (make-hash-table :test 'equal))
+      (setq touchstone--user-aborted nil)
       ;; Initialize backend parser state if backend is selected
       (when touchstone--current-backend
         (let ((create-state-fn (plist-get touchstone--current-backend :create-parser-state)))
