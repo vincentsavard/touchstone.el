@@ -73,6 +73,13 @@ Each backend is a plist with the following keys:
 (defvar-local touchstone--parser-state nil
   "Current parser state for the active backend.")
 
+(defun touchstone--validate-backend (backend-plist)
+  "Validate that BACKEND-PLIST has all required keys.
+Signals an error if any required key is missing."
+  (dolist (key '(:name :detect :build-command :create-parser-state :parse-line :finish))
+    (unless (plist-get backend-plist key)
+      (error "Backend missing required key: %s" key))))
+
 (defun touchstone-register-backend (name backend-plist)
   "Register a test runner backend.
 NAME is a symbol identifying the backend.
@@ -83,6 +90,7 @@ BACKEND-PLIST must contain:
   :create-parser-state - Parser state initializer function
   :parse-line    - Line parser function
   :finish        - Finalization function"
+  (touchstone--validate-backend backend-plist)
   (let ((existing (assq name touchstone--backends)))
     ;; Remove existing registration if present
     (when existing
