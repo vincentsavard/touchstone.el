@@ -163,6 +163,65 @@ Returns (results . final-state) where results includes both
     (should (string= (plist-get result :test) "test_error"))
     (should (eq (plist-get result :status) 'error))))
 
+(ert-deftest touchstone-pytest-test-parse-with-failures-test-statuses ()
+  "Test parsing pytest output with failures - verify test statuses."
+  (let* ((results-and-state (touchstone-pytest-test-load-and-process-fixture "pytest-with-failures.txt"))
+         (results (car results-and-state))
+         (test-results (seq-filter (lambda (r) (plist-get r :id)) results)))
+
+    ;; Should have exactly 4 test results
+    (should (= (length test-results) 4))
+
+    ;; Extract test results by name
+    (let ((test-one (seq-find (lambda (r) (string= (plist-get r :test) "test_one")) test-results))
+          (test-two (seq-find (lambda (r) (string= (plist-get r :test) "test_two")) test-results))
+          (test-three (seq-find (lambda (r) (string= (plist-get r :test) "test_three")) test-results))
+          (test-four (seq-find (lambda (r) (string= (plist-get r :test) "test_four")) test-results)))
+
+      ;; Verify all tests were found
+      (should test-one)
+      (should test-two)
+      (should test-three)
+      (should test-four)
+
+      ;; Verify test statuses
+      (should (eq (plist-get test-one :status) 'passed))
+      (should (eq (plist-get test-two :status) 'failed))
+      (should (eq (plist-get test-three :status) 'passed))
+      (should (eq (plist-get test-four :status) 'failed)))))
+
+(ert-deftest touchstone-pytest-test-parse-with-failures-details ()
+  "Test parsing pytest output with failures - verify failure details."
+  (let* ((results-and-state (touchstone-pytest-test-load-and-process-fixture "pytest-with-failures.txt"))
+         (results (car results-and-state))
+         (detail-results (seq-filter (lambda (r) (and (not (plist-get r :id))
+                                                       (plist-get r :test))) results)))
+
+    ;; Should have exactly 2 detail results
+    (should (= (length detail-results) 2))
+
+    ;; Extract detail results by test name
+    (let ((test-two-details (seq-find (lambda (r) (string= (plist-get r :test) "test_two")) detail-results))
+          (test-four-details (seq-find (lambda (r) (string= (plist-get r :test) "test_four")) detail-results)))
+
+      ;; Verify detail results exist
+      (should test-two-details)
+      (should test-four-details)
+
+      ;; Verify test_two details
+      (let ((details (plist-get test-two-details :details)))
+        (should details)
+        (should (plist-get details :error-lines))
+        (should (plist-get details :location))
+        (should (string-match-p "AssertionError" (plist-get details :location))))
+
+      ;; Verify test_four details
+      (let ((details (plist-get test-four-details :details)))
+        (should details)
+        (should (plist-get details :error-lines))
+        (should (plist-get details :location))
+        (should (string-match-p "ValueError" (plist-get details :location)))))))
+
 (provide 'touchstone-pytest-test)
 
 ;;; touchstone-pytest-test.el ends here
