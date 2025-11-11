@@ -41,8 +41,17 @@ This mimics what the process filter would do."
       (dolist (line lines)
         (touchstone--process-line line)))
     ;; Finalize parsing (simulates process exit)
-    (let ((finish-fn (plist-get backend :finish)))
-      (funcall finish-fn touchstone--parser-state))))
+    (let* ((finish-fn (plist-get backend :finish))
+           (result-and-state (funcall finish-fn touchstone--parser-state))
+           (result (car result-and-state))
+           (final-state (cdr result-and-state)))
+      ;; Update parser state
+      (setq touchstone--parser-state final-state)
+      ;; Process any final result
+      (when result
+        (let ((test-name (plist-get result :test))
+              (details (plist-get result :details)))
+          (touchstone--update-test-details-by-name test-name details))))))
 
 (provide 'test-helper)
 

@@ -127,9 +127,13 @@ Returns updated state."
      ;; Start of a new failure block: _____ test_name _____
      ((string-match "^_+ \\(.*\\) _+$" line)
       (let ((test-name (match-string 1 line)))
-        ;; Finish previous failure if any
+        ;; Finish previous failure if any and store result to return
         (when current-failure
-          (setq state (touchstone-pytest--finish-current-failure state)))
+          (let* ((result-and-state (touchstone-pytest--finish-current-failure state))
+                 (finished-result (car result-and-state)))
+            (setq state (cdr result-and-state))
+            ;; Store the finished result in state to be returned by parse-line
+            (plist-put state :pending-result finished-result)))
         ;; Start new failure
         (plist-put state :current-failure test-name)
         (plist-put state :current-failure-details
@@ -187,30 +191,22 @@ Returns updated state."
     state))
 
 (defun touchstone-pytest--finish-current-failure (state)
-  "Finish parsing the current failure and store its details.
-Returns updated STATE with current failure cleared."
-  (when-let* ((current-failure (plist-get state :current-failure))
-              (current-failure-details (plist-get state :current-failure-details)))
-    ;; Find the test result by matching the test name exactly
-    (when-let* ((matching-key (catch 'found
-                                (maphash
-                                 (lambda (key value)
-                                   (when (string= current-failure (plist-get value :test))
-                                     (throw 'found key)))
-                                 touchstone--test-results)
-                                nil)))
-      (let ((result (gethash matching-key touchstone--test-results)))
-        (puthash matching-key (plist-put result :details current-failure-details)
-                 touchstone--test-results)
-        (touchstone--update-test-display matching-key))))
-  ;; Clear current failure state
-  (plist-put state :current-failure nil)
-  (plist-put state :current-failure-details nil)
-  state)
+  "Finish parsing the current failure and return its details as a result.
+Returns (RESULT . STATE) where RESULT is a plist or nil."
+  (if-let* ((current-failure (plist-get state :current-failure))
+            (current-failure-details (plist-get state :current-failure-details)))
+      (let ((result (list :test current-failure
+                         :details current-failure-details)))
+        ;; Clear current failure state
+        (setq state (plist-put state :current-failure nil))
+        (setq state (plist-put state :current-failure-details nil))
+        (cons result state))
+    ;; No current failure
+    (cons nil state)))
 
 (defun touchstone-pytest--finish (state)
   "Finalize pytest parsing on process exit.
-Ensures any pending failure details are stored.
+Returns (RESULT . FINAL-STATE) for any pending failure details.
 STATE is the current parser state."
   (touchstone-pytest--finish-current-failure state))
 
@@ -225,7 +221,12 @@ Returns (RESULT . NEW-STATE) where RESULT is a test result plist or nil."
 
      ;; Check for end of FAILURES section
      ((string-match "^=+ \\(short test summary\\|[0-9].* in [0-9]\\)" line)
-      (setq state (touchstone-pytest--finish-current-failure state))
+      (let* ((result-and-state (touchstone-pytest--finish-current-failure state))
+             (finished-result (car result-and-state)))
+        (setq state (cdr result-and-state))
+        ;; Store the finished result to be returned by parse-line
+        (when finished-result
+          (plist-put state :pending-result finished-result)))
       (plist-put state :parsing-failures nil))
 
      ;; Inside FAILURES section
@@ -235,6 +236,11 @@ Returns (RESULT . NEW-STATE) where RESULT is a test result plist or nil."
      ;; Test result line (outside FAILURES section)
      (t
       (setq result (touchstone-pytest--parse-test-line line))))
+
+    ;; Check if there's a pending result from failure parsing
+    (when (and (not result) (plist-get state :pending-result))
+      (setq result (plist-get state :pending-result))
+      (setq state (plist-put state :pending-result nil)))
 
     (cons result state)))
 

@@ -65,7 +65,12 @@ Each backend is a plist with the following keys:
                      :file   - Test file path
                      :test   - Test name
                      :status - Symbol: 'passed, 'failed, 'error, 'skipped, or nil
-  :finish        - Function (state) -> () to finalize parsing on process exit")
+                   Or nil if line doesn't contain a test result.
+  :finish        - Function (state) -> (result . final-state)
+                   Called when process exits. Returns final result plist
+                   (if any pending data) and final state.
+                   Result must have same structure as :parse-line results,
+                   or nil if no pending data to finalize.")
 
 (defvar-local touchstone--current-backend nil
   "The currently selected backend for the active test run.")
@@ -274,9 +279,15 @@ Updates parser state and displays test results."
            (new-state (cdr result-and-state)))
       ;; Update parser state
       (setq touchstone--parser-state new-state)
-      ;; Display result if one was returned
+      ;; Process result if one was returned
       (when result
-        (touchstone--display-test-result result)))))
+        (if (plist-get result :id)
+            ;; Full test result - display it
+            (touchstone--display-test-result result)
+          ;; Detail update - update existing test
+          (when-let* ((test-name (plist-get result :test))
+                      (details (plist-get result :details)))
+            (touchstone--update-test-details-by-name test-name details)))))))
 
 (defun touchstone--process-sentinel (proc event)
   "Process sentinel for touchstone test process PROC.
@@ -292,8 +303,17 @@ Handles process completion and errors based on EVENT."
           (setq touchstone--line-buffer ""))
         ;; Finalize backend parsing on process exit
         (when (and (eq status 'exit) touchstone--current-backend)
-          (let ((finish-fn (plist-get touchstone--current-backend :finish)))
-            (funcall finish-fn touchstone--parser-state)))
+          (let* ((finish-fn (plist-get touchstone--current-backend :finish))
+                 (result-and-state (funcall finish-fn touchstone--parser-state))
+                 (result (car result-and-state))
+                 (final-state (cdr result-and-state)))
+            ;; Update parser state
+            (setq touchstone--parser-state final-state)
+            ;; Process any final result
+            (when result
+              (let ((test-name (plist-get result :test))
+                    (details (plist-get result :details)))
+                (touchstone--update-test-details-by-name test-name details)))))
         (cond
          ((eq status 'exit)
           (touchstone--handle-process-complete exit-code))
@@ -380,6 +400,22 @@ Handles process completion and errors based on EVENT."
           (when (plist-get result :details)
             (forward-line 1)
             (touchstone--create-details-overlay result (point))))))))
+
+(defun touchstone--update-test-details-by-name (test-name details)
+  "Find test with TEST-NAME and update it with DETAILS.
+Searches through test results to find matching test name,
+then updates its :details field and refreshes display."
+  (when-let* ((matching-key (catch 'found
+                              (maphash
+                               (lambda (key value)
+                                 (when (string= test-name (plist-get value :test))
+                                   (throw 'found key)))
+                               touchstone--test-results)
+                              nil)))
+    (let ((result (gethash matching-key touchstone--test-results)))
+      (puthash matching-key (plist-put result :details details)
+               touchstone--test-results)
+      (touchstone--update-test-display matching-key))))
 
 ;;; Collapsible Details
 
