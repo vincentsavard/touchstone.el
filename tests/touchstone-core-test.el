@@ -158,6 +158,20 @@ RESULTS is a list of test result plists to return."
   (let ((header (touchstone-core-test-get-header-line)))
     (should (string-match-p (regexp-quote "[fake]") header))))
 
+(ert-deftest touchstone-core-test-header-shows-done-status ()
+  "Test that header updates to done status."
+  (touchstone-core-test-register-fake-backend
+   (list (list :id "file.txt::test_one"
+               :file "file.txt"
+               :test "test_one"
+               :status 'passed)))
+
+  (touchstone-run-tests)
+  (touchstone-core-test-wait-for-process)
+
+  (let ((header (touchstone-core-test-get-header-line)))
+    (should (string-match-p (regexp-quote "Done") header))))
+
 (provide 'touchstone-core-test)
 
 ;;; touchstone-core-test.el ends here
