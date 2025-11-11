@@ -38,8 +38,6 @@
 
 ;;; Code:
 
-(require 'ansi-color)
-
 ;;; Customization
 
 (defgroup touchstone nil
