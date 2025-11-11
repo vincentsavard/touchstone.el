@@ -52,6 +52,13 @@ RESULTS is a list of test result plists to return."
   "Return t if buffer contains TEXT."
   (string-match-p (regexp-quote text) (touchstone-core-test-get-buffer-text)))
 
+(defun touchstone-core-test-get-header-line ()
+  "Get the header line text from the touchstone buffer."
+  (with-current-buffer (get-buffer touchstone-buffer-name)
+    ;; format-mode-line doesn't properly evaluate :eval forms in batch mode,
+    ;; so we manually evaluate the form from header-line-format (:eval FORM)
+    (eval (cadr header-line-format))))
+
 ;;; Tests
 
 (ert-deftest touchstone-core-test-display-single-passed-test ()
@@ -137,6 +144,19 @@ RESULTS is a list of test result plists to return."
 
   (should (touchstone-core-test-buffer-contains "PASS  file.txt::test_one"))
   (should (touchstone-core-test-buffer-contains "FAIL+ file.txt::test_two")))
+
+(ert-deftest touchstone-core-test-header-shows-backend-name ()
+  "Test that header line shows backend name."
+  (touchstone-core-test-register-fake-backend
+   (list (list :id "file.txt::test_one"
+               :file "file.txt"
+               :test "test_one"
+               :status 'passed)))
+
+  (touchstone-run-tests)
+
+  (let ((header (touchstone-core-test-get-header-line)))
+    (should (string-match-p (regexp-quote "[fake]") header))))
 
 (provide 'touchstone-core-test)
 
