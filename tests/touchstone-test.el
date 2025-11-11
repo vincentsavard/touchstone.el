@@ -1,134 +1,259 @@
-;;; touchstone-test.el --- Tests for touchstone.el -*- lexical-binding: t; -*-
+;;; touchstone-test.el --- Unit tests for touchstone.el -*- lexical-binding: t; -*-
 
 ;;; Commentary:
-;; Integration tests for touchstone.el using ERT framework
+;; Unit tests for touchstone.el core using a fake backend
 
 ;;; Code:
 
 (require 'ert)
 (require 'test-helper)
 
-(ert-deftest touchstone-test-simple-passing ()
-  "Test parsing simple pytest output with only passing tests."
-  ;; Get the touchstone buffer
-  (let ((test-buffer (touchstone--get-results-buffer)))
-    (with-current-buffer test-buffer
-      ;; Initialize for new test run
-      (touchstone--init-results-buffer)
+;;; Fake Backend Implementation
 
-      ;; Simulate pytest output line by line
-      (let ((output (touchstone-test-load-fixture "pytest-simple.txt")))
-        (touchstone-test-simulate-output output))
+(defun touchstone-core-test-create-fake-backend (results &optional finish-result)
+  "Create a simple fake backend for testing core.
+RESULTS is a list of test result plists to return.
+FINISH-RESULT is an optional result to return from :finish."
+  (list
+   :name "fake"
+   :detect (lambda (root) t)
+   :build-command (lambda (root)
+                    (let ((n (length results)))
+                      (list "printf" (concat (make-string n ?\n)))))
+   :create-parser-state (lambda () (list :results results))
+   :parse-line (lambda (line state)
+                 (let ((results (plist-get state :results)))
+                   (if results
+                       (let ((result (car results))
+                             (remaining (cdr results)))
+                         (cons result (plist-put state :results remaining)))
+                     (cons nil state))))
+   :finish (lambda (state) (cons finish-result state))))
 
-      ;; Validate hash table has correct number of tests
-      (should (= (hash-table-count touchstone--test-results) 4))
+;;; Helper Functions
 
-      ;; Validate buffer contains test results
-      (let ((buffer-contents (buffer-string)))
-        (should (string-match-p "PASS  tests/test_example\\.py::test_one" buffer-contents))
-        (should (string-match-p "PASS  tests/test_example\\.py::test_two" buffer-contents))
-        (should (string-match-p "PASS  tests/test_example\\.py::test_three" buffer-contents))
-        (should (string-match-p "PASS  tests/test_example\\.py::test_four" buffer-contents))
+(defun touchstone-core-test-register-fake-backend (backend)
+  "Register a fake BACKEND."
+  (touchstone-register-backend 'fake backend)
+  backend)
 
-        ;; Validate no + indicators (no failures with details)
-        (should-not (string-match-p "\\+" buffer-contents)))
+(defun touchstone-core-test-wait-for-process ()
+  "Wait for the touchstone process to complete."
+  (when-let ((proc (get-buffer-process (get-buffer " *touchstone-process*"))))
+    (while (eq (process-status proc) 'run)
+      (accept-process-output proc 0.1))))
 
-      ;; Validate each test has correct metadata
-      (maphash
-       (lambda (key value)
-         (should (string= "tests/test_example.py" (plist-get value :file)))
-         (should (member (plist-get value :test) '("test_one" "test_two" "test_three" "test_four")))
-         (should (eq 'passed (plist-get value :status)))
-         (should-not (plist-get value :details)))
-       touchstone--test-results))))
+(defun touchstone-core-test-get-buffer-text ()
+  "Get buffer text without properties."
+  (with-current-buffer (get-buffer touchstone-buffer-name)
+    (buffer-substring-no-properties (point-min) (point-max))))
 
-(ert-deftest touchstone-test-with-failures ()
-  "Test parsing pytest output with failures."
-  (let ((test-buffer (touchstone--get-results-buffer)))
-    (with-current-buffer test-buffer
-      (touchstone--init-results-buffer)
+(defun touchstone-core-test-buffer-contains (text)
+  "Return t if buffer contains TEXT."
+  (string-match-p (regexp-quote text) (touchstone-core-test-get-buffer-text)))
 
-      ;; Simulate pytest output
-      (let ((output (touchstone-test-load-fixture "pytest-with-failures.txt")))
-        (touchstone-test-simulate-output output))
+(defun touchstone-core-test-get-header-line ()
+  "Get the header line text from the touchstone buffer."
+  (with-current-buffer (get-buffer touchstone-buffer-name)
+    ;; format-mode-line doesn't properly evaluate :eval forms in batch mode,
+    ;; so we manually evaluate the form from header-line-format (:eval FORM)
+    (eval (cadr header-line-format))))
 
-      ;; Validate correct number of tests
-      (should (= (hash-table-count touchstone--test-results) 4))
+;;; Tests
 
-      ;; Validate buffer contains all test results with correct statuses
-      (let ((buffer-contents (buffer-string)))
-        (should (string-match-p "PASS  tests/test_example\\.py::test_one" buffer-contents))
-        (should (string-match-p "FAIL\\+ tests/test_example\\.py::test_two" buffer-contents))
-        (should (string-match-p "PASS  tests/test_example\\.py::test_three" buffer-contents))
-        (should (string-match-p "FAIL\\+ tests/test_example\\.py::test_four" buffer-contents)))
+(ert-deftest touchstone-core-test-display-single-passed-test ()
+  "Test that a single passing test is displayed correctly."
+  (touchstone-core-test-register-fake-backend
+   (touchstone-core-test-create-fake-backend
+    (list (list :id "file.txt::test_one"
+                :file "file.txt"
+                :test "test_one"
+                :status 'passed))))
 
-      ;; Validate individual test metadata and details
-      (let ((test-one (gethash "tests/test_example.py::test_one" touchstone--test-results))
-            (test-two (gethash "tests/test_example.py::test_two" touchstone--test-results))
-            (test-three (gethash "tests/test_example.py::test_three" touchstone--test-results))
-            (test-four (gethash "tests/test_example.py::test_four" touchstone--test-results)))
+  (touchstone-run-tests)
+  (touchstone-core-test-wait-for-process)
 
-        ;; Check statuses
-        (should (eq 'passed (plist-get test-one :status)))
-        (should (eq 'failed (plist-get test-two :status)))
-        (should (eq 'passed (plist-get test-three :status)))
-        (should (eq 'failed (plist-get test-four :status)))
+  (should (touchstone-core-test-buffer-contains "PASS  file.txt::test_one")))
 
-        ;; Passed tests should have no details
-        (should-not (plist-get test-one :details))
-        (should-not (plist-get test-three :details))
+(ert-deftest touchstone-core-test-display-single-failed-test ()
+  "Test that a single failing test is displayed correctly."
+  (touchstone-core-test-register-fake-backend
+   (touchstone-core-test-create-fake-backend
+    (list (list :id "file.txt::test_two"
+                :file "file.txt"
+                :test "test_two"
+                :status 'failed))))
 
-        ;; Failed tests should have details
-        (should (plist-get test-two :details))
-        (should (plist-get test-four :details))
+  (touchstone-run-tests)
+  (touchstone-core-test-wait-for-process)
 
-        ;; Validate test_two details
-        (let ((details (plist-get test-two :details)))
-          (should (plist-get details :error-lines))
-          (should (plist-get details :location))
-          (should (string-match-p "AssertionError" (plist-get details :location))))
+  (should (touchstone-core-test-buffer-contains "FAIL  file.txt::test_two")))
 
-        ;; Validate test_four details
-        (let ((details (plist-get test-four :details)))
-          (should (plist-get details :error-lines))
-          (should (plist-get details :location))
-          (should (string-match-p "ValueError" (plist-get details :location))))))))
+(ert-deftest touchstone-core-test-display-multiple-tests ()
+  "Test that multiple tests are displayed."
+  (touchstone-core-test-register-fake-backend
+   (touchstone-core-test-create-fake-backend
+    (list (list :id "file.txt::test_one"
+                :file "file.txt"
+                :test "test_one"
+                :status 'passed)
+          (list :id "file.txt::test_two"
+                :file "file.txt"
+                :test "test_two"
+                :status 'failed)
+          (list :id "file.txt::test_three"
+                :file "file.txt"
+                :test "test_three"
+                :status 'passed))))
 
-(ert-deftest touchstone-test-with-output ()
-  "Test parsing pytest output with captured stdout/stderr."
-  (let ((test-buffer (touchstone--get-results-buffer)))
-    (with-current-buffer test-buffer
-      (touchstone--init-results-buffer)
+  (touchstone-run-tests)
+  (touchstone-core-test-wait-for-process)
 
-      ;; Simulate pytest output
-      (let ((output (touchstone-test-load-fixture "pytest-with-output.txt")))
-        (touchstone-test-simulate-output output))
+  (should (touchstone-core-test-buffer-contains "PASS  file.txt::test_one"))
+  (should (touchstone-core-test-buffer-contains "FAIL  file.txt::test_two"))
+  (should (touchstone-core-test-buffer-contains "PASS  file.txt::test_three")))
 
-      ;; Validate correct number of tests
-      (should (= (hash-table-count touchstone--test-results) 2))
+(ert-deftest touchstone-core-test-display-test-with-details ()
+  "Test that a test with details shows the + indicator."
+  (touchstone-core-test-register-fake-backend
+   (touchstone-core-test-create-fake-backend
+    (list (list :id "file.txt::test_two"
+                :file "file.txt"
+                :test "test_two"
+                :status 'failed)
+          (list :test "test_two"
+                :details (list :error-lines '("E   assertion failed"))))))
 
-      ;; Validate both tests are FAILED
-      (let ((test-stdout (gethash "test_output.py::test_with_stdout" touchstone--test-results))
-            (test-stderr (gethash "test_output.py::test_with_stderr" touchstone--test-results)))
+  (touchstone-run-tests)
+  (touchstone-core-test-wait-for-process)
 
-        (should (eq 'failed (plist-get test-stdout :status)))
-        (should (eq 'failed (plist-get test-stderr :status)))
+  (should (touchstone-core-test-buffer-contains "FAIL+ file.txt::test_two")))
 
-        ;; Both should have details
-        (should (plist-get test-stdout :details))
-        (should (plist-get test-stderr :details))
+(ert-deftest touchstone-core-test-detail-updates-existing-test ()
+  "Test that detail result updates previously displayed test."
+  (touchstone-core-test-register-fake-backend
+   (touchstone-core-test-create-fake-backend
+    (list (list :id "file.txt::test_one"
+                :file "file.txt"
+                :test "test_one"
+                :status 'passed)
+          (list :id "file.txt::test_two"
+                :file "file.txt"
+                :test "test_two"
+                :status 'failed)
+          (list :test "test_two"
+                :details (list :error-lines '("E   error message"))))))
 
-        ;; Validate captured stdout
-        (let ((details (plist-get test-stdout :details)))
-          (should (plist-get details :stdout))
-          (should (string-match-p "Debug output line 1" (plist-get details :stdout)))
-          (should (string-match-p "Debug output line 2" (plist-get details :stdout))))
+  (touchstone-run-tests)
+  (touchstone-core-test-wait-for-process)
 
-        ;; Validate captured stderr
-        (let ((details (plist-get test-stderr :details)))
-          (should (plist-get details :stderr))
-          (should (string-match-p "Error message 1" (plist-get details :stderr)))
-          (should (string-match-p "Error message 2" (plist-get details :stderr))))))))
+  (should (touchstone-core-test-buffer-contains "PASS  file.txt::test_one"))
+  (should (touchstone-core-test-buffer-contains "FAIL+ file.txt::test_two")))
+
+(ert-deftest touchstone-core-test-header-shows-backend-name ()
+  "Test that header line shows backend name."
+  (touchstone-core-test-register-fake-backend
+   (touchstone-core-test-create-fake-backend
+    (list (list :id "file.txt::test_one"
+                :file "file.txt"
+                :test "test_one"
+                :status 'passed))))
+
+  (touchstone-run-tests)
+
+  (let ((header (touchstone-core-test-get-header-line)))
+    (should (string-match-p (regexp-quote "[fake]") header))))
+
+(ert-deftest touchstone-core-test-header-shows-done-status ()
+  "Test that header updates to done status."
+  (touchstone-core-test-register-fake-backend
+   (touchstone-core-test-create-fake-backend
+    (list (list :id "file.txt::test_one"
+                :file "file.txt"
+                :test "test_one"
+                :status 'passed))))
+
+  (touchstone-run-tests)
+  (touchstone-core-test-wait-for-process)
+
+  (let ((header (touchstone-core-test-get-header-line)))
+    (should (string-match-p (regexp-quote "Done") header))))
+
+(ert-deftest touchstone-core-test-multiple-details-for-same-test ()
+  "Test that details with multiple error lines are displayed in buffer."
+  (touchstone-core-test-register-fake-backend
+   (touchstone-core-test-create-fake-backend
+    (list (list :id "file.txt::test_one"
+                :file "file.txt"
+                :test "test_one"
+                :status 'failed)
+          (list :test "test_one"
+                :details (list :error-lines '("E   first error"
+                                              "E   second error"))))))
+
+  (touchstone-run-tests)
+  (touchstone-core-test-wait-for-process)
+
+  (should (touchstone-core-test-buffer-contains "FAIL+ file.txt::test_one"))
+
+  (with-current-buffer (get-buffer touchstone-buffer-name)
+    (goto-char (point-min))
+    (search-forward "FAIL+")
+    (beginning-of-line)
+    (touchstone--toggle-details-at-point)
+
+    (let ((buffer-text (buffer-substring-no-properties (point-min) (point-max))))
+      (should (string-match-p (regexp-quote "first error") buffer-text))
+      (should (string-match-p (regexp-quote "second error") buffer-text)))))
+
+(ert-deftest touchstone-core-test-empty-input ()
+  "Test that empty input produces empty buffer."
+  (touchstone-core-test-register-fake-backend
+   (touchstone-core-test-create-fake-backend '()))
+
+  (touchstone-run-tests)
+  (touchstone-core-test-wait-for-process)
+
+  (should (string-empty-p (touchstone-core-test-get-buffer-text))))
+
+(ert-deftest touchstone-core-test-finish-returns-detail-updates-test ()
+  "Test that finish function result updates test with indicator."
+  (touchstone-core-test-register-fake-backend
+   (touchstone-core-test-create-fake-backend
+    (list (list :id "file.txt::test_one"
+                :file "file.txt"
+                :test "test_one"
+                :status 'failed))
+    (list :test "test_one"
+          :details (list :error-lines '("E   error from finish")))))
+
+  (touchstone-run-tests)
+  (touchstone-core-test-wait-for-process)
+
+  (should (touchstone-core-test-buffer-contains "FAIL+ file.txt::test_one")))
+
+(ert-deftest touchstone-core-test-finish-returns-detail-displays-content ()
+  "Test that finish function details are displayed in buffer."
+  (touchstone-core-test-register-fake-backend
+   (touchstone-core-test-create-fake-backend
+    (list (list :id "file.txt::test_one"
+                :file "file.txt"
+                :test "test_one"
+                :status 'failed))
+    (list :test "test_one"
+          :details (list :error-lines '("E   error from finish")))))
+
+  (touchstone-run-tests)
+  (touchstone-core-test-wait-for-process)
+
+  (with-current-buffer (get-buffer touchstone-buffer-name)
+    (goto-char (point-min))
+    (search-forward "FAIL+")
+    (beginning-of-line)
+    (touchstone--toggle-details-at-point)
+
+    (let ((buffer-text (buffer-substring-no-properties (point-min) (point-max))))
+      (should (string-match-p (regexp-quote "error from finish") buffer-text)))))
 
 (provide 'touchstone-test)
 
