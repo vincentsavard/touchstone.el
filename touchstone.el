@@ -67,10 +67,10 @@ Each backend is a plist with the following keys:
                      :status - Symbol: 'passed, 'failed, 'error, 'skipped, or nil
   :finish        - Function (state) -> () to finalize parsing on process exit")
 
-(defvar touchstone--current-backend nil
+(defvar-local touchstone--current-backend nil
   "The currently selected backend for the active test run.")
 
-(defvar touchstone--parser-state nil
+(defvar-local touchstone--parser-state nil
   "Current parser state for the active backend.")
 
 (defun touchstone-register-backend (name backend-plist)
@@ -103,22 +103,22 @@ Returns backend plist or nil if no backend matches."
 
 ;;; Variables
 
-(defvar touchstone--process nil
+(defvar-local touchstone--process nil
   "The current touchstone test process.")
 
 (defvar touchstone--buffer nil
   "The touchstone results buffer.")
 
-(defvar touchstone--output-buffer ""
+(defvar-local touchstone--output-buffer ""
   "Accumulator for partial output from the test process.")
 
-(defvar touchstone--line-buffer ""
+(defvar-local touchstone--line-buffer ""
   "Accumulator for partial lines from the test process.")
 
 (defvar touchstone--project-root nil
   "Cached project root directory.")
 
-(defvar touchstone--test-results nil
+(defvar-local touchstone--test-results nil
   "Hash table mapping test identifiers to result data.
 Keys are backend-specific test identifier strings.
 Values are plists with :id, :file, :test, :status, :marker, :details.")
@@ -231,27 +231,30 @@ The process streams output to the touchstone results buffer."
   "Process filter for touchstone test process PROC.
 Accumulates STRING output and updates the results buffer incrementally."
   (when (buffer-live-p (process-buffer proc))
-    ;; Accumulate all output for debugging
-    (setq touchstone--output-buffer
-          (concat touchstone--output-buffer string))
-    ;; Accumulate into line buffer
-    (setq touchstone--line-buffer
-          (concat touchstone--line-buffer string))
-    ;; Process complete lines
-    (let ((lines (split-string touchstone--line-buffer "\n")))
-      ;; If the buffer ends with a newline, we have all complete lines
-      ;; Otherwise, keep the last partial line in the buffer
-      (if (string-suffix-p "\n" touchstone--line-buffer)
-          (progn
-            (dolist (line lines)
-              (touchstone--process-line line))
-            (setq touchstone--line-buffer ""))
-        ;; Keep the last partial line
-        (let ((complete-lines (butlast lines))
-              (partial-line (car (last lines))))
-          (dolist (line complete-lines)
-            (touchstone--process-line line))
-          (setq touchstone--line-buffer partial-line))))))
+    ;; Operate in the results buffer context where buffer-local variables live
+    (when (buffer-live-p touchstone--buffer)
+      (with-current-buffer touchstone--buffer
+        ;; Accumulate all output for debugging
+        (setq touchstone--output-buffer
+              (concat touchstone--output-buffer string))
+        ;; Accumulate into line buffer
+        (setq touchstone--line-buffer
+              (concat touchstone--line-buffer string))
+        ;; Process complete lines
+        (let ((lines (split-string touchstone--line-buffer "\n")))
+          ;; If the buffer ends with a newline, we have all complete lines
+          ;; Otherwise, keep the last partial line in the buffer
+          (if (string-suffix-p "\n" touchstone--line-buffer)
+              (progn
+                (dolist (line lines)
+                  (touchstone--process-line line))
+                (setq touchstone--line-buffer ""))
+            ;; Keep the last partial line
+            (let ((complete-lines (butlast lines))
+                  (partial-line (car (last lines))))
+              (dolist (line complete-lines)
+                (touchstone--process-line line))
+              (setq touchstone--line-buffer partial-line))))))))
 
 (defun touchstone--process-line (line)
   "Process a complete LINE of test output using the current backend.
@@ -270,22 +273,24 @@ Updates parser state and displays test results."
 (defun touchstone--process-sentinel (proc event)
   "Process sentinel for touchstone test process PROC.
 Handles process completion and errors based on EVENT."
-  (let ((status (process-status proc))
-        (exit-code (process-exit-status proc)))
-    ;; Process any remaining partial line
-    (when (and (not (string-empty-p touchstone--line-buffer))
-               (eq status 'exit))
-      (touchstone--process-line touchstone--line-buffer)
-      (setq touchstone--line-buffer ""))
-    ;; Finalize backend parsing on process exit
-    (when (and (eq status 'exit) touchstone--current-backend)
-      (let ((finish-fn (plist-get touchstone--current-backend :finish)))
-        (funcall finish-fn touchstone--parser-state)))
-    (cond
-     ((eq status 'exit)
-      (touchstone--handle-process-complete exit-code))
-     ((memq status '(signal failed))
-      (touchstone--handle-process-error event)))))
+  (when (buffer-live-p touchstone--buffer)
+    (with-current-buffer touchstone--buffer
+      (let ((status (process-status proc))
+            (exit-code (process-exit-status proc)))
+        ;; Process any remaining partial line
+        (when (and (not (string-empty-p touchstone--line-buffer))
+                   (eq status 'exit))
+          (touchstone--process-line touchstone--line-buffer)
+          (setq touchstone--line-buffer ""))
+        ;; Finalize backend parsing on process exit
+        (when (and (eq status 'exit) touchstone--current-backend)
+          (let ((finish-fn (plist-get touchstone--current-backend :finish)))
+            (funcall finish-fn touchstone--parser-state)))
+        (cond
+         ((eq status 'exit)
+          (touchstone--handle-process-complete exit-code))
+         ((memq status '(signal failed))
+          (touchstone--handle-process-error event)))))))
 
 (defun touchstone--handle-process-complete (exit-code)
   "Handle test process completion with EXIT-CODE."
@@ -304,12 +309,13 @@ Handles process completion and errors based on EVENT."
 
 (defun touchstone--kill-process ()
   "Kill the current touchstone test process if running."
-  (when (and touchstone--process
-             (process-live-p touchstone--process))
-    (with-current-buffer (touchstone--get-results-buffer)
-      (setq touchstone--user-aborted t))
-    (kill-process touchstone--process)
-    (setq touchstone--process nil)))
+  (when (buffer-live-p touchstone--buffer)
+    (with-current-buffer touchstone--buffer
+      (when (and touchstone--process
+                 (process-live-p touchstone--process))
+        (setq touchstone--user-aborted t)
+        (kill-process touchstone--process)
+        (setq touchstone--process nil)))))
 
 ;;; Results Buffer Management
 
@@ -534,27 +540,32 @@ Press TAB or RET on a test to toggle its details.
          (backend (touchstone--select-backend root)))
     (if (not backend)
         (error "No test backend found for this project")
-      ;; Set current backend
-      (setq touchstone--current-backend backend)
+      ;; Get results buffer first
+      (let ((results-buffer (touchstone--get-results-buffer)))
+        (with-current-buffer results-buffer
+          ;; Set current backend
+          (setq touchstone--current-backend backend)
 
-      ;; Initialize results buffer (this also initializes parser state)
-      (touchstone--init-results-buffer)
-      (touchstone--display-results-buffer)
+          ;; Initialize results buffer (this also initializes parser state)
+          (touchstone--init-results-buffer)
+          (touchstone--display-results-buffer)
 
-      ;; Build command using backend
-      (let* ((build-command-fn (plist-get backend :build-command))
-             (command-list (funcall build-command-fn root)))
-        ;; Create and start the process
-        (setq touchstone--process
-              (touchstone--make-process command-list))
-        (message "Running tests with %s..." (plist-get backend :name))))))
+          ;; Build command using backend
+          (let* ((build-command-fn (plist-get backend :build-command))
+                 (command-list (funcall build-command-fn root)))
+            ;; Create and start the process
+            (setq touchstone--process
+                  (touchstone--make-process command-list))
+            (message "Running tests with %s..." (plist-get backend :name))))))))
 
 ;;;###autoload
 (defun touchstone-kill-process ()
   "Kill the currently running test process."
   (interactive)
-  (if (and touchstone--process
-           (process-live-p touchstone--process))
+  (if (and (buffer-live-p touchstone--buffer)
+           (with-current-buffer touchstone--buffer
+             (and touchstone--process
+                  (process-live-p touchstone--process))))
       (progn
         (touchstone--kill-process)
         (message "Test process killed"))
