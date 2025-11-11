@@ -243,8 +243,7 @@ Returns (RESULT . NEW-STATE) where RESULT is a test result plist or nil."
        :build-command #'touchstone-pytest--build-command
        :create-parser-state #'touchstone-pytest--create-parser-state
        :parse-line #'touchstone-pytest--parse-line
-       :finish #'touchstone-pytest--finish
-       :priority 10))
+       :finish #'touchstone-pytest--finish))
 
 (provide 'touchstone-pytest)
 

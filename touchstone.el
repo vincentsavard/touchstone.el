@@ -67,8 +67,7 @@ Each backend is a plist with the following keys:
                      :file   - Test file path
                      :test   - Test name
                      :status - Symbol: 'passed, 'failed, 'error, 'skipped, or nil
-  :finish        - Function (state) -> () to finalize parsing on process exit
-  :priority      - Integer priority (higher = checked first)")
+  :finish        - Function (state) -> () to finalize parsing on process exit")
 
 (defvar touchstone--current-backend nil
   "The currently selected backend for the active test run.")
@@ -85,21 +84,13 @@ BACKEND-PLIST must contain:
   :build-command - Command builder function
   :create-parser-state - Parser state initializer function
   :parse-line    - Line parser function
-  :finish        - Finalization function
-  :priority      - Integer priority (optional, default 0)"
-  (let ((priority (or (plist-get backend-plist :priority) 0))
-        (existing (assq name touchstone--backends)))
+  :finish        - Finalization function"
+  (let ((existing (assq name touchstone--backends)))
     ;; Remove existing registration if present
     (when existing
       (setq touchstone--backends (delq existing touchstone--backends)))
     ;; Add new registration
-    (push (cons name backend-plist) touchstone--backends)
-    ;; Sort by priority (higher first)
-    (setq touchstone--backends
-          (sort touchstone--backends
-                (lambda (a b)
-                  (> (or (plist-get (cdr a) :priority) 0)
-                     (or (plist-get (cdr b) :priority) 0)))))))
+    (push (cons name backend-plist) touchstone--backends)))
 
 (defun touchstone--select-backend (root)
   "Select appropriate backend for project at ROOT.
