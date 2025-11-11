@@ -198,6 +198,15 @@ RESULTS is a list of test result plists to return."
       (should (string-match-p (regexp-quote "first error") buffer-text))
       (should (string-match-p (regexp-quote "second error") buffer-text)))))
 
+(ert-deftest touchstone-core-test-empty-input ()
+  "Test that empty input produces empty buffer."
+  (touchstone-core-test-register-fake-backend '())
+
+  (touchstone-run-tests)
+  (touchstone-core-test-wait-for-process)
+
+  (should (string-empty-p (touchstone-core-test-get-buffer-text))))
+
 (provide 'touchstone-core-test)
 
 ;;; touchstone-core-test.el ends here
